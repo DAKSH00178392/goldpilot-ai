@@ -1,0 +1,177 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>GoldPilot AI - Gold Trading Decision Engine</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="preconnect" href="https://unpkg.com">
+    <style>
+      /* Design system from blueprint */
+      :root{
+        --bg:#0A0E14;--card:#121826;--border:#1E2635;--text:#E6EDF7;--muted:#7A879B;
+        --bull:#00C176;--bear:#FF5C5C;--warn:#FFB020;--glass:rgba(255,255,255,0.03);
+        --mono: 'JetBrains Mono', monospace;
+      }
+      html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text);}
+      .app{max-width:1400px;margin:14px auto;padding:12px}
+      /* Top nav */
+      .topnav{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px}
+      .nav-left{display:flex;align-items:center;gap:12px}
+      .logo{width:36px;height:36px;border-radius:6px;background:linear-gradient(135deg,var(--bull),#006b3a);display:flex;align-items:center;justify-content:center;font-weight:700}
+      .nav-center{display:flex;align-items:center;gap:8px}
+      .nav-right{display:flex;align-items:center;gap:12px;color:var(--muted);font-family:var(--mono)}
+      select,input,button{font-family:Inter,system-ui;padding:8px;border-radius:6px;background:var(--glass);border:1px solid var(--border);color:var(--text)}
+      button.primary{background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.04)}
+
+      /* Main layout 3 columns */
+      .main{display:grid;grid-template-columns:55% 25% 20%;gap:12px;margin-top:12px}
+      .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px}
+      /* Chart area */
+      #chart{height:520px}
+      .stats-grid{display:flex;gap:8px;margin-top:10px}
+      .stat{flex:1;background:rgba(255,255,255,0.02);padding:8px;border-radius:6px}
+      .stat .lbl{font-size:12px;color:var(--muted)}
+      .stat .val{font-family:var(--mono);font-size:20px;margin-top:6px}
+
+      /* Signal panel */
+      .signal-large{display:flex;flex-direction:column;gap:8px}
+      .signal-side{font-family:var(--mono);font-size:22px}
+      .reason-list{margin-top:8px;color:var(--muted);font-size:13px}
+
+      /* Execution column */
+      .order-book{display:flex;flex-direction:column;gap:8px}
+      .owrap{display:flex;gap:8px}
+
+      /* Bottom tabs */
+      .bottom{margin-top:12px}
+      .tabs{display:flex;gap:8px}
+      .tab{padding:8px 12px;border-radius:6px;background:transparent;border:1px solid var(--border);color:var(--muted);cursor:pointer}
+      .tab.active{background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);color:var(--text)}
+
+      .muted{color:var(--muted)}
+    </style>
+    <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <div class="topnav">
+        <div class="nav-left">
+          <div class="logo">GP</div>
+          <div style="font-weight:600">GoldPilot AI</div>
+        </div>
+
+        <div class="nav-center">
+          <label class="muted">Symbol</label>
+          <select id="symbol">
+            <option selected>PAXGUSDT</option>
+            <option>BTCUSDT</option>
+            <option>ETHUSDT</option>
+            <option>SOLUSDT</option>
+            <option>BNBUSDT</option>
+            <option>XRPUSDT</option>
+          </select>
+          <label class="muted">Interval</label>
+          <select id="interval"><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option></select>
+          <button id="startLive" class="primary">Start Live</button>
+          <button id="stopLive" disabled>Stop</button>
+          <label style="margin-left:8px" class="muted"><input type="checkbox" id="showOverlays" checked> Show overlays</label>
+        </div>
+
+        <div class="nav-right">
+          <div id="connStatus">LIVE</div>
+          <div id="signalMode">Decision Engine</div>
+          <div id="clock">--:--:--</div>
+        </div>
+      </div>
+
+      <div class="main">
+        <!-- Column 1: Market Overview -->
+        <div>
+          <div class="card">
+            <div id="chart"></div>
+            <div class="stats-grid">
+              <div class="stat"><div class="lbl">Price</div><div id="priceDisplay" class="val">—</div></div>
+              <div class="stat"><div class="lbl">24h</div><div id="changePct" class="val">—</div></div>
+              <div class="stat"><div class="lbl">Volume</div><div id="vol24" class="val">—</div></div>
+              <div class="stat"><div class="lbl">ATR</div><div id="atrVal" class="val">—</div></div>
+              <div class="stat"><div class="lbl">Volatility</div><div id="volScore" class="val">—</div></div>
+            </div>
+          </div>
+          <div class="card" style="margin-top:10px">
+            <h4 style="margin:0">Market Stats</h4>
+            <pre id="jsonOut" class="muted">Engines output</pre>
+          </div>
+        </div>
+
+        <!-- Column 2: Signal Intelligence -->
+        <div>
+          <div class="card signal-large">
+            <div>
+              <div id="signalSide" class="signal-side">WAIT</div>
+              <div id="signalConfidence" class="muted">Bias confidence: -</div>
+            </div>
+            <div>
+              <div><strong>Entry:</strong> <span id="signalEntry">-</span></div>
+              <div><strong>Stop:</strong> <span id="signalStop">-</span></div>
+              <div><strong>TP:</strong> <span id="signalTP">-</span></div>
+              <div class="muted" id="rrVal">R:R -</div>
+            </div>
+            <div class="reason-list" id="signalReasons">No reasons yet</div>
+          </div>
+
+          <div class="card" style="margin-top:10px">
+            <h4 style="margin:0">Market Bias</h4>
+            <div id="biasMeter" class="muted">Neutral</div>
+          </div>
+
+          <div class="card" style="margin-top:10px">
+            <h4 style="margin:0">Signal History</h4>
+            <div id="signalHistory" class="muted">(history will appear here)</div>
+          </div>
+        </div>
+
+        <!-- Column 3: Execution Intelligence -->
+        <div>
+          <div class="card">
+            <h4 style="margin:0">Order Book Heat</h4>
+            <div id="orderBook" style="margin-top:8px">asks/bids placeholders</div>
+          </div>
+
+          <div class="card" style="margin-top:10px">
+            <h4 style="margin:0">Recent Sweeps</h4>
+            <div id="recentSweeps" class="muted">(no sweeps)</div>
+          </div>
+
+          <div class="card" style="margin-top:10px">
+            <h4 style="margin:0">Watchlist</h4>
+            <div id="watchlist" class="muted">PAXG / XAU proxy, BTC, ETH, SOL</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bottom">
+        <div class="tabs">
+          <div class="tab active">Signal History</div>
+          <div class="tab">Strategy Analytics</div>
+          <div class="tab">Backtest Console</div>
+        </div>
+      </div>
+
+      <script src="src/trading_engines.js"></script>
+      <script src="src/live_connector.js"></script>
+
+      <script>
+        // small UI helpers
+        function updateClock(){ document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US',{hour12:false}); }
+        setInterval(updateClock,1000); updateClock();
+
+        // forward symbol/interval to existing controls used by live_connector
+        // live_connector expects elements with ids `symbol`,`interval`,`startLive`,`stopLive`
+        // they already exist in topnav
+
+        // simple tab click handler
+        document.querySelectorAll('.tab').forEach((t,i)=> t.addEventListener('click', ()=>{ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); }));
+      </script>
+    </div>
+  </body>
+</html>

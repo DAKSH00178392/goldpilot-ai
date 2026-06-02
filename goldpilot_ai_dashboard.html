@@ -1,0 +1,980 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GoldPilot AI - XAUUSD Intelligence Dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap');
+
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --gold:#C9A84C;--gold-light:#E8C97A;--gold-dim:#8C6E2F;
+  --bg:#0D0E11;--bg2:#13151A;--bg3:#1A1D24;--bg4:#21252F;
+  --border:#2A2E38;--border2:#353A47;
+  --text:#E8E6DF;--text2:#9B9890;--text3:#5C5A55;
+  --green:#3DB87E;--red:#E05252;--amber:#E8A534;--blue:#4A9EE8;
+  --radius:10px;
+  font-family:'Outfit',sans-serif;
+}
+
+body{background:var(--bg);color:var(--text);font-size:13px;overflow-x:hidden}
+
+.shell{display:flex;flex-direction:column;min-height:100vh}
+
+/* TOP BAR */
+.topbar{
+  display:flex;align-items:center;gap:16px;padding:14px 20px;
+  background:var(--bg2);border-bottom:1px solid var(--border);
+}
+.logo{display:flex;align-items:center;gap:8px}
+.logo-icon{
+  width:28px;height:28px;background:var(--gold);border-radius:6px;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'DM Serif Display',serif;font-size:14px;color:#000;font-weight:700;
+}
+.logo-text{font-size:15px;font-weight:600;letter-spacing:-.2px}
+.logo-sub{font-size:10px;color:var(--text3);letter-spacing:.8px;text-transform:uppercase;font-family:'DM Mono',monospace}
+
+.nav-pills{display:flex;gap:4px;margin-left:auto}
+.pill{
+  padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;
+  border:1px solid transparent;color:var(--text2);transition:all .15s;
+}
+.pill:hover{background:var(--bg3);color:var(--text)}
+.pill.active{background:var(--bg4);border-color:var(--border2);color:var(--text)}
+
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.live-badge{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--green);font-family:'DM Mono',monospace}
+.mobile-alert-btn{
+  background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);
+  font-size:11px;font-family:'DM Mono',monospace;padding:6px 8px;cursor:pointer;
+}
+.mobile-alert-btn.active{border-color:rgba(61,184,126,.35);color:var(--green)}
+.mobile-alert-btn.blocked{border-color:rgba(224,82,82,.35);color:var(--red)}
+.symbol-picker{display:flex;align-items:center;gap:6px;margin-left:10px}
+.symbol-picker label{font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.5px}
+.symbol-picker select{
+  background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);
+  font-size:11px;font-family:'DM Mono',monospace;padding:6px 8px;
+}
+
+/* MAIN LAYOUT */
+.main{display:grid;grid-template-columns:1fr 300px;flex:1;gap:0}
+.left-col{display:flex;flex-direction:column;gap:1px;border-right:1px solid var(--border)}
+.right-col{display:flex;flex-direction:column;gap:1px}
+
+/* TRADE STATUS HERO */
+.status-hero{
+  background:var(--bg2);padding:20px;
+  border-bottom:1px solid var(--border);
+}
+.status-row{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.status-badge{
+  padding:6px 14px;border-radius:6px;font-size:11px;font-weight:600;
+  letter-spacing:.8px;text-transform:uppercase;font-family:'DM Mono',monospace;
+  transition:all .3s;
+}
+.status-badge.wait{background:rgba(232,165,52,.12);color:var(--amber);border:1px solid rgba(232,165,52,.25)}
+.status-badge.allowed{background:rgba(61,184,126,.12);color:var(--green);border:1px solid rgba(61,184,126,.25)}
+.status-badge.blocked{background:rgba(224,82,82,.12);color:var(--red);border:1px solid rgba(224,82,82,.25)}
+
+.price-display{margin-left:auto;text-align:right}
+.price-num{font-family:'DM Mono',monospace;font-size:22px;font-weight:500;color:var(--gold-light)}
+.price-change{font-size:11px;color:var(--green);font-family:'DM Mono',monospace}
+
+.status-reason{
+  font-size:13px;color:var(--text2);line-height:1.7;
+  padding:12px 14px;background:var(--bg3);border-radius:var(--radius);
+  border-left:2px solid var(--amber);
+}
+.status-reason b{color:var(--text);font-weight:500}
+
+/* MINI CHART */
+.chart-area{
+  background:var(--bg2);padding:16px 20px;border-bottom:1px solid var(--border);
+}
+.chart-header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.tf-pills{display:flex;gap:3px;margin-left:auto}
+.tf{
+  padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;
+  color:var(--text3);font-family:'DM Mono',monospace;transition:all .15s;
+}
+.tf:hover{color:var(--text2)}
+.tf.active{background:var(--bg4);color:var(--gold);border:1px solid var(--gold-dim)}
+
+.candle-chart{position:relative;height:320px;overflow:hidden}
+svg.chart{width:100%;height:100%}
+.chart .price-axis text,.chart .price-label{
+  font-family:'DM Mono',monospace;
+  font-size:9px;
+  fill:var(--text3);
+}
+.chart .price-grid{stroke:rgba(255,255,255,.06);stroke-width:1}
+.chart .current-price-line{stroke:var(--gold);stroke-width:1;stroke-dasharray:4 4}
+.chart .current-price-bg{fill:rgba(201,168,76,.16);stroke:rgba(201,168,76,.35);stroke-width:1}
+.chart .current-price-text{font-family:'DM Mono',monospace;font-size:10px;fill:var(--gold-light);font-weight:600}
+.chart .hover-crosshair{stroke:rgba(255,255,255,.38);stroke-width:1;shape-rendering:crispEdges}
+.chart .hover-price-bg{fill:rgba(18,20,27,.96);stroke:rgba(255,255,255,.24);stroke-width:1}
+.chart .hover-price-text{font-family:'DM Mono',monospace;font-size:10px;fill:var(--text);font-weight:600}
+.chart-tooltip{
+  position:absolute;display:none;pointer-events:none;z-index:4;
+  background:rgba(18,20,27,.96);border:1px solid rgba(255,255,255,.16);
+  border-radius:6px;padding:6px 8px;color:var(--text);font-family:'DM Mono',monospace;
+  font-size:10px;line-height:1.45;box-shadow:0 8px 24px rgba(0,0,0,.35);
+  min-width:178px;
+}
+.chart-tooltip b{color:var(--gold-light);font-weight:600}
+
+/* MODULES GRID */
+.modules{
+  display:grid;grid-template-columns:1fr 1fr;gap:1px;
+  background:var(--border);flex:1;
+}
+.module{
+  background:var(--bg2);padding:16px;
+  transition:background .15s;cursor:default;
+}
+.module:hover{background:var(--bg3)}
+.module-label{
+  font-size:10px;text-transform:uppercase;letter-spacing:.8px;
+  color:var(--text3);font-family:'DM Mono',monospace;margin-bottom:10px;
+}
+.module-title{font-size:14px;font-weight:500;margin-bottom:4px}
+.module-sub{font-size:12px;color:var(--text2)}
+
+.score-bar{
+  height:3px;border-radius:2px;background:var(--bg4);margin-top:8px;overflow:hidden;
+}
+.score-fill{height:100%;border-radius:2px;transition:width .5s ease}
+
+.bias-arrows{display:flex;gap:4px;margin-top:6px}
+.tf-bias{
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:6px 8px;background:var(--bg4);border-radius:6px;flex:1;
+}
+.tf-label{font-size:9px;color:var(--text3);font-family:'DM Mono',monospace}
+.bias-dot{width:8px;height:8px;border-radius:50%}
+.bullish{background:var(--green)}
+.bearish{background:var(--red)}
+.neutral{background:var(--text3)}
+
+/* LIQUIDITY MAP */
+.liq-item{
+  display:flex;align-items:center;gap:8px;padding:5px 0;
+  border-bottom:1px solid var(--border);
+}
+.liq-item:last-child{border:none}
+.liq-price{font-family:'DM Mono',monospace;font-size:12px;font-weight:500}
+.liq-label{font-size:11px;color:var(--text2);flex:1}
+.liq-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.liq-tag{
+  font-size:9px;padding:2px 6px;border-radius:4px;
+  font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.4px;
+}
+.swept{background:rgba(61,184,126,.12);color:var(--green)}
+.pending{background:rgba(201,168,76,.12);color:var(--gold)}
+.danger{background:rgba(224,82,82,.12);color:var(--red)}
+
+/* RIGHT COL */
+.panel{background:var(--bg2);padding:16px;border-bottom:1px solid var(--border)}
+.panel-title{
+  font-size:10px;text-transform:uppercase;letter-spacing:.8px;
+  color:var(--text3);font-family:'DM Mono',monospace;margin-bottom:12px;
+  display:flex;align-items:center;gap:6px;
+}
+
+/* SIGNAL CARD */
+.signal-card{
+  background:var(--bg3);border:1px solid var(--border2);
+  border-radius:var(--radius);padding:14px;margin-bottom:10px;
+}
+.signal-header{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.signal-type{font-size:12px;font-weight:600;color:var(--green)}
+.signal-time{font-size:10px;color:var(--text3);margin-left:auto;font-family:'DM Mono',monospace}
+.signal-clear{
+  display:none;background:var(--bg4);border:1px solid var(--border2);border-radius:6px;
+  color:var(--text2);font-size:10px;font-family:'DM Mono',monospace;padding:5px 7px;cursor:pointer;
+}
+.signal-clear:hover{border-color:var(--red);color:var(--red)}
+
+.entry-zone{
+  background:rgba(61,184,126,.08);border:1px solid rgba(61,184,126,.2);
+  border-radius:6px;padding:8px 10px;margin-bottom:8px;
+}
+.zone-label{font-size:10px;color:var(--green);margin-bottom:2px;letter-spacing:.4px;text-transform:uppercase;font-family:'DM Mono',monospace}
+.zone-price{font-size:16px;font-weight:600;font-family:'DM Mono',monospace;color:var(--green)}
+.zone-range{font-size:11px;color:var(--text2);font-family:'DM Mono',monospace}
+
+.tp-sl{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.tp-box,.sl-box{border-radius:6px;padding:8px 10px}
+.tp-box{background:rgba(61,184,126,.06);border:1px solid rgba(61,184,126,.15)}
+.sl-box{background:rgba(224,82,82,.06);border:1px solid rgba(224,82,82,.15)}
+.tp-box .lbl{font-size:9px;color:var(--green);margin-bottom:2px;letter-spacing:.4px;text-transform:uppercase;font-family:'DM Mono',monospace}
+.sl-box .lbl{font-size:9px;color:var(--red);margin-bottom:2px;letter-spacing:.4px;text-transform:uppercase;font-family:'DM Mono',monospace}
+.tp-box .val{font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:var(--green)}
+.sl-box .val{font-size:13px;font-weight:600;font-family:'DM Mono',monospace;color:var(--red)}
+
+.rr-row{display:flex;align-items:center;gap:8px}
+.rr-label{font-size:11px;color:var(--text2)}
+.rr-val{font-family:'DM Mono',monospace;font-size:13px;font-weight:600;color:var(--gold)}
+.rr-bar{flex:1;height:3px;background:var(--bg4);border-radius:2px;overflow:hidden}
+.rr-fill{height:100%;background:var(--gold);border-radius:2px;width:70%}
+.direction-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.direction-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px}
+.direction-card.long{border-color:rgba(61,184,126,.22)}
+.direction-card.short{border-color:rgba(224,82,82,.22)}
+.direction-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:5px}
+.direction-name{font-family:'DM Mono',monospace;font-size:11px;font-weight:600}
+.direction-card.long .direction-name{color:var(--green)}
+.direction-card.short .direction-name{color:var(--red)}
+.direction-score{font-family:'DM Mono',monospace;font-size:11px;color:var(--gold)}
+.direction-stage{font-size:11px;color:var(--text2);line-height:1.45}
+.direction-stage b{color:var(--text);font-weight:500}
+.demo-list{display:flex;flex-direction:column;gap:8px}
+.demo-trade{
+  background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:9px;
+}
+.demo-trade.open{border-color:rgba(61,184,126,.22)}
+.demo-trade.closed{border-color:rgba(255,255,255,.12);opacity:.9}
+.demo-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:5px}
+.demo-symbol{font-family:'DM Mono',monospace;font-size:11px;color:var(--text);font-weight:600}
+.demo-status{font-family:'DM Mono',monospace;font-size:10px;color:var(--gold)}
+.demo-line{font-size:11px;color:var(--text2);line-height:1.45}
+.demo-pnl.win{color:var(--green)}
+.demo-pnl.loss{color:var(--red)}
+
+/* RISK CALCULATOR */
+.risk-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)}
+.risk-row:last-child{border:none}
+.risk-label{font-size:12px;color:var(--text2)}
+.risk-val{font-family:'DM Mono',monospace;font-size:12px;font-weight:500}
+.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.setting-field{display:flex;flex-direction:column;gap:4px}
+.setting-field label{font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.4px}
+.setting-field input{
+  width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;
+  color:var(--text);font-family:'DM Mono',monospace;font-size:12px;padding:7px 8px;
+}
+.setting-field input:focus{outline:none;border-color:var(--gold-dim)}
+.settings-actions{display:flex;gap:8px;margin-top:10px}
+.settings-actions button{
+  flex:1;background:var(--bg4);border:1px solid var(--border2);border-radius:6px;
+  color:var(--text);font-size:11px;font-family:'DM Mono',monospace;padding:7px 8px;cursor:pointer;
+}
+.settings-actions button:hover{border-color:var(--gold-dim);color:var(--gold-light)}
+
+/* JOURNAL */
+.journal-section{background:var(--bg2);border-top:1px solid var(--border);padding:16px 20px}
+.journal-head{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.journal-title{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);font-family:'DM Mono',monospace}
+.journal-actions{display:flex;gap:8px;margin-left:auto}
+.journal-actions button{
+  background:var(--bg4);border:1px solid var(--border2);border-radius:6px;color:var(--text);
+  font-size:11px;font-family:'DM Mono',monospace;padding:7px 9px;cursor:pointer;
+}
+.journal-actions button:hover{border-color:var(--gold-dim);color:var(--gold-light)}
+.journal-table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px}
+.journal-table{width:100%;border-collapse:collapse;min-width:880px;background:var(--bg3)}
+.journal-table th,.journal-table td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left;font-size:11px}
+.journal-table th{color:var(--text3);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.5px;background:var(--bg4)}
+.journal-table td{color:var(--text2)}
+.journal-table tr:last-child td{border-bottom:0}
+.journal-status{font-family:'DM Mono',monospace;font-weight:600}
+.journal-status.allowed{color:var(--green)}
+.journal-status.blocked{color:var(--red)}
+.journal-status.wait{color:var(--amber)}
+.watchlist-row{display:grid;grid-template-columns:70px 1fr 72px;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer}
+.watchlist-row:hover{background:rgba(255,255,255,.025)}
+.watchlist-row:last-child{border-bottom:0}
+.watch-symbol{font-family:'DM Mono',monospace;font-size:11px;color:var(--text)}
+.watch-status{font-size:11px;color:var(--text2);line-height:1.35}
+.watch-score{font-family:'DM Mono',monospace;font-size:11px;text-align:right}
+.watch-score.ready{color:var(--green)}
+.watch-score.blocked{color:var(--red)}
+.watch-score.wait{color:var(--amber)}
+.watch-alert{
+  padding:8px 9px;border-radius:6px;background:rgba(61,184,126,.08);
+  border:1px solid rgba(61,184,126,.18);margin-bottom:8px;font-size:11px;color:var(--text2)
+}
+.watch-alert b{color:var(--green)}
+.watch-alert button{
+  display:block;width:100%;text-align:left;margin-top:6px;background:rgba(61,184,126,.08);
+  border:1px solid rgba(61,184,126,.18);border-radius:6px;color:var(--text);
+  font-size:11px;font-family:'DM Mono',monospace;padding:7px 8px;cursor:pointer;
+}
+.watch-alert button:hover{border-color:var(--green)}
+.mobile-alert-strip{
+  position:fixed;left:12px;right:12px;bottom:12px;z-index:20;display:none;
+  background:rgba(18,20,27,.96);border:1px solid rgba(201,168,76,.35);
+  border-left:3px solid var(--gold);border-radius:8px;padding:10px 12px;
+  color:var(--text);box-shadow:0 12px 30px rgba(0,0,0,.45);
+}
+.mobile-alert-strip.show{display:block}
+.mobile-alert-title{font-size:11px;font-family:'DM Mono',monospace;color:var(--gold);text-transform:uppercase;margin-bottom:4px}
+.mobile-alert-body{font-size:12px;color:var(--text2);line-height:1.45}
+.trade-review-grid{display:grid;grid-template-columns:1.4fr .8fr .8fr .8fr;gap:8px;margin-bottom:10px}
+.trade-review-grid label{font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.4px}
+.trade-review-field{display:flex;flex-direction:column;gap:4px}
+.trade-review-field select,.trade-review-field input,.trade-review-field textarea{
+  width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;
+  color:var(--text);font-family:'DM Mono',monospace;font-size:11px;padding:7px 8px;
+}
+.trade-review-field textarea{min-height:34px;resize:vertical;font-family:'Outfit',sans-serif}
+.trade-review-field select:focus,.trade-review-field input:focus,.trade-review-field textarea:focus{outline:none;border-color:var(--gold-dim)}
+.trade-actions{display:flex;gap:8px;margin-bottom:12px}
+.trade-actions button{
+  background:var(--bg4);border:1px solid var(--border2);border-radius:6px;color:var(--text);
+  font-size:11px;font-family:'DM Mono',monospace;padding:7px 9px;cursor:pointer;
+}
+.trade-actions button:hover{border-color:var(--gold-dim);color:var(--gold-light)}
+
+/* NEWS WARNING */
+.news-item{
+  display:flex;align-items:flex-start;gap:8px;padding:8px 0;
+  border-bottom:1px solid var(--border);
+}
+.news-item:last-child{border:none}
+.news-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:3px}
+.high-impact{background:var(--red)}
+.med-impact{background:var(--amber)}
+.news-text{font-size:12px;color:var(--text);line-height:1.5}
+.news-text a{color:var(--text);text-decoration:none}
+.news-text a:hover{color:var(--gold-light)}
+.news-time{font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;margin-top:2px}
+.news-tag{font-size:9px;padding:1px 5px;border-radius:3px;display:inline-block;margin-top:3px;font-family:'DM Mono',monospace;text-transform:uppercase}
+.high-tag{background:rgba(224,82,82,.12);color:var(--red)}
+.med-tag{background:rgba(232,165,52,.12);color:var(--amber)}
+
+/* REGIME BADGE */
+.regime-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:4px 10px;border-radius:5px;font-size:11px;
+  background:rgba(74,158,232,.1);color:var(--blue);
+  border:1px solid rgba(74,158,232,.2);
+  font-family:'DM Mono',monospace;margin-top:4px;
+}
+
+/* TABS bottom */
+.bottom-bar{
+  background:var(--bg2);border-top:1px solid var(--border);
+  padding:10px 20px;display:flex;align-items:center;gap:12px;
+}
+.session-indicator{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2)}
+.session-dot{width:6px;height:6px;border-radius:50%}
+.ny-session{background:var(--blue)}
+.stat-pill{
+  padding:3px 8px;background:var(--bg4);border:1px solid var(--border);
+  border-radius:4px;font-size:11px;color:var(--text2);
+  font-family:'DM Mono',monospace;
+}
+.stat-pill span{color:var(--text)}
+
+@media (max-width: 980px){
+  .topbar{flex-wrap:wrap;padding:12px}
+  .nav-pills{order:3;width:100%;margin-left:0;overflow-x:auto;padding-bottom:2px}
+  .pill{white-space:nowrap}
+  .main{grid-template-columns:1fr}
+  .left-col{border-right:0}
+  .right-col{border-top:1px solid var(--border)}
+  .modules{grid-template-columns:1fr}
+  .status-row{align-items:flex-start;flex-wrap:wrap}
+  .price-display{margin-left:0;text-align:left;width:100%}
+  .bottom-bar{flex-wrap:wrap;padding:10px 12px}
+  .journal-section{padding:12px}
+  .journal-head{flex-wrap:wrap}
+  .journal-actions{width:100%;margin-left:0}
+  .journal-actions button{flex:1}
+  .trade-review-grid{grid-template-columns:1fr 1fr}
+}
+
+@media (max-width: 560px){
+  .status-hero,.chart-area,.module,.panel{padding:12px}
+  .status-row{gap:10px}
+  .chart-header{flex-wrap:wrap}
+  .tf-pills{margin-left:0;width:100%;overflow-x:auto}
+  .tf{white-space:nowrap}
+  .tp-sl{grid-template-columns:1fr}
+  .direction-grid{grid-template-columns:1fr}
+  .risk-row{gap:10px}
+  .risk-val{text-align:right}
+  .bottom-bar{align-items:flex-start}
+  .stat-pill{max-width:100%}
+  .trade-review-grid{grid-template-columns:1fr}
+  .trade-actions{flex-direction:column}
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="logo">
+      <div class="logo-icon">G</div>
+      <div>
+        <div class="logo-text">GoldPilot AI</div>
+        <div class="logo-sub">XAUUSD Intelligence</div>
+      </div>
+    </div>
+    <div class="nav-pills">
+      <div class="pill active">Dashboard</div>
+      <div class="pill">Analysis</div>
+      <div class="pill">Backtests</div>
+      <div class="pill">Journal</div>
+      <div class="pill">Settings</div>
+    </div>
+    <div class="live-badge" style="margin-left:16px">
+      <div class="live-dot"></div>
+      LIVE
+    </div>
+    <button type="button" class="mobile-alert-btn" id="enable-mobile-alerts">Alerts</button>
+    <div class="symbol-picker">
+      <label for="primary-symbol">Symbol</label>
+      <select id="primary-symbol">
+        <option value="PAXGUSDT">PAXGUSDT</option>
+        <option value="BTCUSDT">BTCUSDT</option>
+        <option value="ETHUSDT">ETHUSDT</option>
+        <option value="SOLUSDT">SOLUSDT</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="main" id="dashboard-section">
+    <!-- LEFT COLUMN -->
+    <div class="left-col">
+
+      <!-- TRADE STATUS HERO -->
+      <div class="status-hero">
+        <div class="status-row">
+          <div>
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;font-family:'DM Mono',monospace;margin-bottom:5px">Trade Decision</div>
+            <div id="status-badge" class="status-badge wait">⏸ WAIT</div>
+          </div>
+          <div style="margin-left:14px">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;font-family:'DM Mono',monospace;margin-bottom:3px">Setup detected</div>
+            <div style="font-size:13px;color:var(--amber);font-weight:500">Liquidity sweep forming</div>
+            <div class="regime-badge"><i class="ti ti-trending-up" aria-hidden="true" style="font-size:12px"></i> Bullish pullback mode</div>
+          </div>
+          <div class="price-display">
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;font-family:'DM Mono',monospace;margin-bottom:3px">XAUUSD</div>
+            <div class="price-num" id="live-price">2,347.80</div>
+            <div class="price-change" id="live-chg">▲ +0.34% today</div>
+          </div>
+        </div>
+        <div class="status-reason" id="status-reason">
+          <b>Waiting for confirmation.</b> Sell-side liquidity at <b>2,341.20</b> not yet swept. Price is mid-range between session high/low. <b>15M structure</b> is still bearish — no CHOCH confirmed. DXY is flat. Wait for sweep of <b>2,341</b> low or breakout above <b>2,353</b> with a retest.
+        </div>
+      </div>
+
+      <!-- MINI CHART -->
+      <div class="chart-area">
+        <div class="chart-header">
+          <span style="font-size:12px;font-weight:500">Price Action</span>
+          <div class="tf-pills">
+            <div class="tf">1M</div>
+            <div class="tf">5M</div>
+            <div class="tf active">15M</div>
+            <div class="tf">1H</div>
+            <div class="tf">4H</div>
+          </div>
+        </div>
+        <div class="candle-chart">
+          <svg class="chart" viewBox="0 0 600 300" preserveAspectRatio="none">
+            <!-- Liquidity zone shading -->
+            <rect x="0" y="242" width="600" height="18" fill="rgba(224,82,82,.06)" rx="0"/>
+            <text font-size="9" fill="#E05252" opacity=".6" x="6" y="255" font-family="DM Mono,monospace">2341.20 — Sell-side liq.</text>
+            <rect x="0" y="5" width="600" height="12" fill="rgba(201,168,76,.08)" rx="0"/>
+            <text font-size="9" fill="#C9A84C" opacity=".6" x="6" y="16" font-family="DM Mono,monospace">2353.50 — Buy-side liq.</text>
+            <!-- Candles data — simple representative set -->
+            <g id="candles"></g>
+            <g id="price-axis" class="price-axis"></g>
+            <g id="current-price-marker"></g>
+            <g id="hover-price-marker" style="display:none"></g>
+          </svg>
+          <div class="chart-tooltip" id="chart-tooltip"></div>
+        </div>
+      </div>
+
+      <!-- 4 MODULE GRID -->
+      <div class="modules">
+        <!-- MTF Bias -->
+        <div class="module">
+          <div class="module-label">Multi-TF Bias</div>
+          <div class="module-title" style="color:var(--green)">Bullish</div>
+          <div class="module-sub">Confidence 68%</div>
+          <div class="score-bar"><div class="score-fill" style="width:68%;background:var(--green)"></div></div>
+          <div class="bias-arrows">
+            <div class="tf-bias"><div class="tf-label">D</div><div class="bias-dot bullish"></div></div>
+            <div class="tf-bias"><div class="tf-label">4H</div><div class="bias-dot bullish"></div></div>
+            <div class="tf-bias"><div class="tf-label">1H</div><div class="bias-dot bullish"></div></div>
+            <div class="tf-bias"><div class="tf-label">15M</div><div class="bias-dot bearish"></div></div>
+            <div class="tf-bias"><div class="tf-label">5M</div><div class="bias-dot neutral"></div></div>
+          </div>
+        </div>
+        <!-- Market Regime -->
+        <div class="module">
+          <div class="module-label">Market Regime</div>
+          <div class="module-title">Pullback</div>
+          <div class="module-sub">Trending → correcting</div>
+          <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+            <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(61,184,126,.1);color:var(--green);font-family:'DM Mono',monospace">Long allowed</span>
+            <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(224,82,82,.1);color:var(--red);font-family:'DM Mono',monospace">Short blocked</span>
+            <span style="font-size:10px;padding:2px 6px;border-radius:3px;background:rgba(255,255,255,.05);color:var(--text2);font-family:'DM Mono',monospace">Breakout block</span>
+          </div>
+        </div>
+        <!-- Candle Metrics -->
+        <div class="module">
+          <div class="module-label">Candle Metrics</div>
+          <div style="margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+              <span style="font-size:11px;color:var(--text2)">Strength</span>
+              <span style="font-size:11px;font-family:'DM Mono',monospace;color:var(--text)">74/100</span>
+            </div>
+            <div class="score-bar"><div class="score-fill" style="width:74%;background:var(--amber)"></div></div>
+          </div>
+          <div style="margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+              <span style="font-size:11px;color:var(--text2)">Rejection</span>
+              <span style="font-size:11px;font-family:'DM Mono',monospace;color:var(--text)">42/100</span>
+            </div>
+            <div class="score-bar"><div class="score-fill" style="width:42%;background:var(--blue)"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+              <span style="font-size:11px;color:var(--text2)">Breakout quality</span>
+              <span style="font-size:11px;font-family:'DM Mono',monospace;color:var(--red)">Weak</span>
+            </div>
+            <div class="score-bar"><div class="score-fill" style="width:28%;background:var(--red)"></div></div>
+          </div>
+        </div>
+        <!-- Liquidity Map -->
+        <div class="module">
+          <div class="module-label">Liquidity Map</div>
+          <div class="liq-item">
+            <div class="liq-dot" style="background:var(--amber)"></div>
+            <div class="liq-label">Prev. day high</div>
+            <div class="liq-price" style="color:var(--amber)">2,356.40</div>
+            <div class="liq-tag pending">Pending</div>
+          </div>
+          <div class="liq-item">
+            <div class="liq-dot" style="background:var(--blue)"></div>
+            <div class="liq-label">NY high</div>
+            <div class="liq-price" style="color:var(--blue)">2,353.50</div>
+            <div class="liq-tag pending">Pending</div>
+          </div>
+          <div class="liq-item">
+            <div class="liq-dot" style="background:var(--text3)"></div>
+            <div class="liq-label">Current price</div>
+            <div class="liq-price">2,347.80</div>
+            <div class="liq-tag" style="background:rgba(255,255,255,.05);color:var(--text3)">Here</div>
+          </div>
+          <div class="liq-item">
+            <div class="liq-dot" style="background:var(--red)"></div>
+            <div class="liq-label">Sell-side target</div>
+            <div class="liq-price" style="color:var(--red)">2,341.20</div>
+            <div class="liq-tag danger">Watch</div>
+          </div>
+          <div class="liq-item">
+            <div class="liq-dot" style="background:var(--green)"></div>
+            <div class="liq-label">1H demand zone</div>
+            <div class="liq-price" style="color:var(--green)">2,336–2,338</div>
+            <div class="liq-tag swept">Valid</div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /left-col -->
+
+    <!-- RIGHT COLUMN -->
+    <div class="right-col">
+
+      <!-- SIGNAL CARD -->
+      <div class="panel" id="settings-section">
+        <div class="panel-title"><i class="ti ti-bolt" aria-hidden="true"></i>Next valid signal</div>
+        <div class="signal-card">
+          <div class="signal-header">
+            <i class="ti ti-arrow-up" style="color:var(--green);font-size:14px" aria-hidden="true"></i>
+            <span class="signal-type">LONG — Sweep reversal</span>
+            <span class="signal-time">Forming</span>
+            <button type="button" class="signal-clear" id="clear-committed-signal">Clear</button>
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:10px;line-height:1.6">
+            Awaiting sweep of <span style="color:var(--red);font-family:'DM Mono',monospace">2,341.20</span> + bullish CHOCH on 5M. Do not enter early.
+          </div>
+          <div class="direction-grid" id="direction-grid">
+            <div class="direction-card long">
+              <div class="direction-head">
+                <span class="direction-name">LONG</span>
+                <span class="direction-score">0%</span>
+              </div>
+              <div class="direction-stage">Waiting for long setup.</div>
+            </div>
+            <div class="direction-card short">
+              <div class="direction-head">
+                <span class="direction-name">SHORT</span>
+                <span class="direction-score">0%</span>
+              </div>
+              <div class="direction-stage">Waiting for short setup.</div>
+            </div>
+          </div>
+          <div class="entry-zone">
+            <div class="zone-label">Entry zone (after confirmation)</div>
+            <div class="zone-price">2,336 – 2,340</div>
+          </div>
+          <div class="tp-sl">
+            <div class="tp-box">
+              <div class="lbl">TP1</div>
+              <div class="val">2,353</div>
+            </div>
+            <div class="sl-box">
+              <div class="lbl">Invalidation</div>
+              <div class="val">2,333</div>
+            </div>
+          </div>
+          <div class="tp-sl" style="margin-bottom:10px">
+            <div class="tp-box">
+              <div class="lbl">TP2</div>
+              <div class="val">2,362</div>
+            </div>
+            <div class="sl-box">
+              <div class="lbl">Hard SL</div>
+              <div class="val">2,332.50</div>
+            </div>
+          </div>
+          <div class="rr-row">
+            <span class="rr-label">R:R</span>
+            <div class="rr-bar"><div class="rr-fill"></div></div>
+            <span class="rr-val">1:2.6</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="demo-panel">
+        <div class="panel-title"><i class="ti ti-player-play" aria-hidden="true"></i>Demo Auto Trades</div>
+        <div id="demo-trades" class="demo-list">
+          <div class="demo-trade">
+            <div class="demo-head">
+              <span class="demo-symbol">-</span>
+              <span class="demo-status">Waiting</span>
+            </div>
+            <div class="demo-line">Committed signals will open demo trades here.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RISK ENGINE -->
+      <div class="panel" id="risk-panel">
+        <div class="panel-title"><i class="ti ti-shield-check" aria-hidden="true"></i>Risk Engine</div>
+        <div class="risk-row">
+          <span class="risk-label">Account balance</span>
+          <span class="risk-val" style="color:var(--text)">$1,000</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-label">Risk per trade</span>
+          <span class="risk-val" style="color:var(--amber)">1% — $10.00</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-label">SL distance</span>
+          <span class="risk-val" style="font-family:'DM Mono',monospace">62 pips</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-label">Suggested lot size</span>
+          <span class="risk-val" style="color:var(--green);font-family:'DM Mono',monospace">0.01</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-label">Daily loss used</span>
+          <span class="risk-val" style="color:var(--green)">0 / 3%</span>
+        </div>
+        <div class="risk-row">
+          <span class="risk-label">Trades today</span>
+          <span class="risk-val">1 / 3</span>
+        </div>
+        <div style="margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--green)">
+          <div style="font-size:10px;color:var(--green);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Risk status</div>
+          <div style="font-size:12px;color:var(--text)">Permitted — within daily limits</div>
+        </div>
+        <form id="risk-settings-form" autocomplete="off">
+          <div class="settings-grid">
+            <div class="setting-field">
+              <label for="setting-balance">Balance</label>
+              <input id="setting-balance" type="number" min="0" step="1" value="1000">
+            </div>
+            <div class="setting-field">
+              <label for="setting-risk-pct">Risk %</label>
+              <input id="setting-risk-pct" type="number" min="0.1" max="10" step="0.1" value="1">
+            </div>
+            <div class="setting-field">
+              <label for="setting-min-lot">Min lot</label>
+              <input id="setting-min-lot" type="number" min="0.01" step="0.01" value="0.01">
+            </div>
+            <div class="setting-field">
+              <label for="setting-tick-value">Value per qty</label>
+              <input id="setting-tick-value" type="number" min="1" step="1" value="1">
+            </div>
+            <div class="setting-field">
+              <label for="setting-daily-loss">Daily loss %</label>
+              <input id="setting-daily-loss" type="number" min="0.5" max="20" step="0.5" value="3">
+            </div>
+            <div class="setting-field">
+              <label for="setting-max-trades">Max trades</label>
+              <input id="setting-max-trades" type="number" min="1" max="20" step="1" value="3">
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button type="submit">Save Risk</button>
+            <button type="button" id="reset-risk-settings">Reset</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- NEWS FILTER -->
+      <div class="panel" id="news-panel">
+        <div class="panel-title"><i class="ti ti-broadcast" aria-hidden="true"></i>News filter</div>
+        <div class="news-item">
+          <div class="news-dot high-impact"></div>
+          <div>
+            <div class="news-text">US CPI (MoM)</div>
+            <div class="news-time">Tomorrow 08:30 EST</div>
+            <span class="news-tag high-tag">High impact</span>
+          </div>
+        </div>
+        <div class="news-item">
+          <div class="news-dot med-impact"></div>
+          <div>
+            <div class="news-text">FOMC Member speech</div>
+            <div class="news-time">Today 16:15 EST</div>
+            <span class="news-tag med-tag">Medium</span>
+          </div>
+        </div>
+        <div style="margin-top:10px;padding:8px 10px;background:rgba(61,184,126,.06);border-radius:6px;border:1px solid rgba(61,184,126,.15)">
+          <div style="font-size:11px;color:var(--green);font-weight:500">✓ Safe to trade now</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px">No news within 30-min window</div>
+        </div>
+      </div>
+
+      <!-- SETUP CHECKLIST -->
+      <div class="panel" style="flex:1">
+        <div class="panel-title"><i class="ti ti-list-check" aria-hidden="true"></i>Setup checklist</div>
+        <div id="checklist"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title"><i class="ti ti-radar" aria-hidden="true"></i>Crypto Watchlist Alerts</div>
+        <div id="watchlist-alerts" class="watch-alert">Scanning configured Binance symbols.</div>
+        <div id="crypto-watchlist">
+          <div class="watchlist-row">
+            <div class="watch-symbol">-</div>
+            <div class="watch-status">Waiting for scan</div>
+            <div class="watch-score wait">-</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="journal-section" id="journal-section">
+    <div class="journal-head">
+      <div>
+        <div class="journal-title"><i class="ti ti-notebook" aria-hidden="true"></i> Signal Journal</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:3px">Recent decision snapshots saved locally</div>
+      </div>
+      <div class="journal-actions">
+        <button type="button" id="save-journal-snapshot">Save Snapshot</button>
+        <button type="button" id="clear-journal">Clear Journal</button>
+      </div>
+    </div>
+    <div class="journal-table-wrap">
+      <table class="journal-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>TF</th>
+            <th>Status</th>
+            <th>Bias</th>
+            <th>Regime</th>
+            <th>Setup</th>
+            <th>Entry</th>
+            <th>SL</th>
+            <th>TP1</th>
+            <th>R:R</th>
+          </tr>
+        </thead>
+        <tbody id="journal-rows">
+          <tr><td colspan="10">No journal snapshots yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="journal-section" id="trade-review-section">
+    <div class="journal-head">
+      <div>
+        <div class="journal-title"><i class="ti ti-clipboard-check" aria-hidden="true"></i> Trade Review Journal</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:3px">Executed trades and review notes used by daily risk limits</div>
+      </div>
+    </div>
+    <form id="trade-review-form" autocomplete="off">
+      <div class="trade-review-grid">
+        <div class="trade-review-field">
+          <label for="trade-source-signal">Signal</label>
+          <select id="trade-source-signal">
+            <option value="">Latest decision snapshot</option>
+          </select>
+        </div>
+        <div class="trade-review-field">
+          <label for="trade-result">Result</label>
+          <select id="trade-result">
+            <option value="win">Win</option>
+            <option value="loss">Loss</option>
+            <option value="breakeven">Breakeven</option>
+            <option value="missed">Missed</option>
+          </select>
+        </div>
+        <div class="trade-review-field">
+          <label for="trade-review-type">Review</label>
+          <select id="trade-review-type">
+            <option value="valid">Valid trade</option>
+            <option value="valid-loss">Valid loss</option>
+            <option value="mistake">Mistake</option>
+            <option value="rule-break">Rule break</option>
+          </select>
+        </div>
+        <div class="trade-review-field">
+          <label for="trade-loss-pct">Loss %</label>
+          <input id="trade-loss-pct" type="number" min="0" max="100" step="0.1" value="0">
+        </div>
+        <div class="trade-review-field" style="grid-column:1/-1">
+          <label for="trade-notes">Notes</label>
+          <textarea id="trade-notes" placeholder="Why was this trade taken? Any mistake, emotion, or valid loss detail?"></textarea>
+        </div>
+      </div>
+      <div class="trade-actions">
+        <button type="submit">Save Trade Review</button>
+        <button type="button" id="clear-trade-journal">Clear Trade Journal</button>
+      </div>
+    </form>
+    <div class="journal-table-wrap">
+      <table class="journal-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>TF</th>
+            <th>Result</th>
+            <th>Review</th>
+            <th>Setup</th>
+            <th>Entry</th>
+            <th>SL</th>
+            <th>TP1</th>
+            <th>R:R</th>
+            <th>Loss %</th>
+          </tr>
+        </thead>
+        <tbody id="trade-journal-rows">
+          <tr><td colspan="10">No reviewed trades yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- BOTTOM BAR -->
+  <div class="bottom-bar">
+    <div class="session-indicator">
+      <div class="session-dot ny-session"></div>
+      <span>New York session</span>
+    </div>
+    <div class="stat-pill">Spread <span>0.8</span></div>
+    <div class="stat-pill">ATR(14) <span>18.4</span></div>
+    <div class="stat-pill">Data <span>Binance PAXGUSDT</span></div>
+    <div class="stat-pill">News <span>Manual</span></div>
+    <div style="margin-left:auto;font-size:11px;color:var(--text3);font-family:'DM Mono',monospace" id="clock">--:--:-- UTC</div>
+  </div>
+</div>
+
+<div class="mobile-alert-strip" id="mobile-alert-strip">
+  <div class="mobile-alert-title">GoldPilot Alert</div>
+  <div class="mobile-alert-body">Waiting for alert.</div>
+</div>
+
+<script>
+const checks = [
+  {ok:true,  label:'Higher-TF bias bullish'},
+  {ok:true,  label:'Session: NY active'},
+  {ok:true,  label:'Spread normal (0.8)'},
+  {ok:true,  label:'No imminent news'},
+  {ok:false, label:'Sell-side liquidity swept'},
+  {ok:false, label:'Bullish CHOCH on 5M'},
+  {ok:false, label:'Retest entry trigger'},
+  {ok:true,  label:'R:R valid (1:2.6)'},
+  {ok:true,  label:'Risk within daily limit'},
+];
+const cl = document.getElementById('checklist');
+checks.forEach(c=>{
+  const d=document.createElement('div');
+  d.style.cssText='display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)';
+  d.innerHTML=`
+    <div style="width:16px;height:16px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;
+      background:${c.ok?'rgba(61,184,126,.12)':'rgba(255,255,255,.04)'};
+      border:1px solid ${c.ok?'rgba(61,184,126,.25)':'var(--border)'};
+      color:${c.ok?'var(--green)':'var(--text3)'}">
+      ${c.ok?'✓':'○'}
+    </div>
+    <span style="font-size:12px;color:${c.ok?'var(--text)':'var(--text3)'}">${c.label}</span>
+    ${c.ok?'':'<span style="font-size:10px;color:var(--amber);margin-left:auto;font-family:\'DM Mono\',monospace">Wait</span>'}
+  `;
+  cl.appendChild(d);
+});
+cl.lastChild.style.borderBottom='none';
+
+// Simple candle chart
+const svg=document.querySelector('svg.chart g#candles');
+const candles=[
+  {o:70,h:65,l:80,c:68},{o:68,h:62,l:72,c:63},{o:63,h:58,l:66,c:65},
+  {o:65,h:56,l:67,c:58},{o:58,h:50,l:62,c:52},{o:52,h:44,l:55,c:47},
+  {o:47,h:42,l:55,c:53},{o:53,h:40,l:55,c:42},{o:42,h:36,l:46,c:44},
+  {o:44,h:38,l:52,c:50},{o:50,h:44,l:56,c:48},{o:48,h:42,l:52,c:45},
+  {o:45,h:40,l:55,c:52},{o:52,h:46,l:60,c:58},{o:58,h:52,l:62,c:56},
+  {o:56,h:48,l:60,c:50},{o:50,h:44,l:58,c:55},{o:55,h:48,l:62,c:60},
+  {o:60,h:52,l:65,c:58},{o:58,h:54,l:64,c:62},{o:62,h:55,l:66,c:58},
+  {o:58,h:52,l:65,c:63},{o:63,h:56,l:68,c:65}
+];
+const W=600,n=candles.length,cw=Math.floor(W/n)-1;
+candles.forEach((c,i)=>{
+  const x=i*(cw+1)+1;const bull=c.c<c.o;
+  const col=bull?'#3DB87E':'#E05252';
+  const top=Math.min(c.o,c.c),bot=Math.max(c.o,c.c);
+  svg.innerHTML+=`<line x1="${x+cw/2}" y1="${c.h}" x2="${x+cw/2}" y2="${c.l}" stroke="${col}" stroke-width="1"/>
+  <rect x="${x}" y="${top}" width="${cw}" height="${Math.max(1,bot-top)}" fill="${col}" rx="0.5"/>`;
+});
+
+// Clock
+function tick(){
+  const n=new Date();
+  const s=t=>String(t).padStart(2,'0');
+  document.getElementById('clock').textContent=`${s(n.getUTCHours())}:${s(n.getUTCMinutes())}:${s(n.getUTCSeconds())} UTC`;
+}
+tick();setInterval(tick,1000);
+
+// Live market data is rendered by src/goldpilot_live_dashboard.js.
+
+// Nav tabs
+document.querySelectorAll('.pill').forEach(p=>{
+  p.addEventListener('click',()=>{
+    document.querySelectorAll('.pill').forEach(x=>x.classList.remove('active'));
+    p.classList.add('active');
+  });
+});
+document.querySelectorAll('.tf').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.tf').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+  });
+});
+</script>
+<script src="src/trading_engines.js"></script>
+<script src="src/goldpilot_live_dashboard.js"></script>
+</body>
+</html>
