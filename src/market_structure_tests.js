@@ -38,6 +38,7 @@ ok(decision.trendQuality && typeof decision.trendQuality.score === 'number', 'Go
 ok(decision.cryptoContext && Array.isArray(decision.cryptoContext.warnings), 'GoldPilot decision returns crypto risk context');
 ok(decision.htfAlignment && Array.isArray(decision.htfAlignment.hits), 'GoldPilot decision returns HTF zone alignment context');
 ok(decision.sessionRules && decision.sessionRules.session, 'GoldPilot decision returns session rules context');
+ok(decision.signalGrade && decision.signalGrade.grade, 'GoldPilot decision returns signal grade');
 ok(decision.setupStage && Array.isArray(decision.missingConditions) && typeof decision.entryReadinessScore === 'number', 'GoldPilot decision returns setup stage/readiness fields');
 ok(decision.longSetup && decision.shortSetup && decision.preferredDirection, 'GoldPilot decision returns long/short setup candidates');
 ok(decision.nextStepForecast && decision.nextStepForecast.nextCandleMust, 'GoldPilot decision returns next-step candle forecast');
@@ -94,6 +95,8 @@ ok(engineSource.includes('All real targets are too close'), 'trade plan explains
 ok(engineSource.includes('minorTargets'), 'trade plan separates minor targets from actionable targets');
 ok(engineSource.includes('WATCH_ONLY'), 'engine demotes invalid R:R setup candidates to watch-only');
 ok(engineSource.includes('Watch only: reward is too small'), 'engine explains invalid reward as watch-only');
+ok(engineSource.includes('buildSignalGrade'), 'engine grades signals for A/B/C decision levels');
+ok(engineSource.includes("['A+','A','B+']"), 'engine marks A/A+/B+ grades as committable');
 
 // 4) High-impact USD news blocks new trades
 const blocked = engines.analyzeGoldPilot({
@@ -165,6 +168,8 @@ ok(connectorJs.includes('wireCommittedSignal'), 'dashboard allows manual committ
 ok(dashboardHtml.includes('clear-committed-signal'), 'dashboard exposes committed-signal clear control');
 ok(connectorJs.includes('goldpilotDemoTrades'), 'dashboard persists demo trades across shutdowns');
 ok(connectorJs.includes('upsertDemoTradeFromSignal'), 'committed signals open demo trades automatically');
+ok(connectorJs.includes('isCommittableDecision'), 'dashboard commits A/A+/B+ grade decisions');
+ok(connectorJs.includes('commitWatchlistSignal'), 'watchlist can commit ready signals across all scanned symbols');
 ok(connectorJs.includes('updateDemoTrades'), 'demo trades update against live price for TP/SL/PnL');
 ok(connectorJs.includes('BREAKEVEN_STOP'), 'committed trade state machine supports breakeven after TP1');
 ok(connectorJs.includes('breakEvenArmed'), 'demo trade management arms breakeven after TP1');

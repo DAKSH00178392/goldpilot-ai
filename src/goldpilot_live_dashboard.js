@@ -399,7 +399,7 @@
   }
 
   function commitDecision(decision){
-    if(decision.tradeStatus !== 'ENTRY READY' || !decision.tradePlan) return null;
+    if(!isCommittableDecision(decision) || !decision.tradePlan) return null;
     const signals = loadCommittedSignals();
     const key = committedKey();
     const existing = signals[key];
@@ -440,6 +440,7 @@
       plan:decision.tradePlan,
       planSignature:signature,
       risk:decision.risk,
+      signalGrade:decision.signalGrade,
       entryReadinessScore:decision.entryReadinessScore || 0,
       reason:(decision.reason || []).slice(0, 5)
     };
@@ -447,11 +448,15 @@
     saveCommittedSignals(signals);
     upsertDemoTradeFromSignal(committed);
     pushMobileAlert(
-      `Committed ${committed.symbol} ${committed.plan.side}`,
+      `Committed ${committed.symbol} ${committed.plan.side} ${committed.signalGrade ? committed.signalGrade.grade : ''}`,
       `Entry ${fmtPrice(committed.plan.entry)} | SL ${fmtPrice(committed.plan.stopLoss)} | TP1 ${fmtPrice(committed.plan.takeProfit && committed.plan.takeProfit.tp1)}`,
       `commit|${committed.id}`
     );
     return committed;
+  }
+
+  function isCommittableDecision(decision){
+    return !!(decision && decision.tradePlan && decision.signalGrade && decision.signalGrade.committable);
   }
 
   function loadActiveCommittedSignal(){
@@ -889,7 +894,12 @@
         stopLoss:plan ? plan.stopLoss : null,
         tp1:plan && plan.takeProfit ? plan.takeProfit.tp1 : null,
         riskReward:plan ? plan.riskReward : null,
-        ready:decision.tradeStatus === 'ENTRY READY' || decision.tradeStatus.includes('ALLOWED'),
+        grade:decision.signalGrade ? decision.signalGrade.grade : '-',
+        committable:decision.signalGrade ? decision.signalGrade.committable : false,
+        plan,
+        risk:decision.risk,
+        setupObj:decision.setup,
+        ready:isCommittableDecision(decision),
         blocked:decision.tradeStatus === 'BLOCKED',
         reason:[...(decision.missingConditions || []), ...(decision.nextConditionNeeded || []), ...(decision.reason || [])].slice(0,2).join(' ')
       };
@@ -937,12 +947,13 @@
   function renderDecisionState(decision){
     const score = decision.entryReadinessScore || 0;
     const badge = qs('#status-badge');
-    if(badge && decision.tradeStatus === 'ENTRY READY') badge.classList.add('allowed');
+    if(badge && isCommittableDecision(decision)) badge.classList.add('allowed');
     const setupEl = qsa('.status-row > div')[1];
     if(setupEl){
       const lines = setupEl.querySelectorAll('div');
       if(lines[1]){
-        lines[1].textContent = `${decision.setupStage || 'WAIT'} | readiness ${score}%`;
+        const grade = decision.signalGrade ? ` | grade ${decision.signalGrade.grade}` : '';
+        lines[1].textContent = `${decision.setupStage || 'WAIT'} | readiness ${score}%${grade}`;
       }
     }
   }
@@ -952,7 +963,7 @@
     if(badge){
       badge.className = 'status-badge';
       if(decision.tradeStatus === 'BLOCKED') badge.classList.add('blocked');
-      else if(decision.tradeStatus.includes('ALLOWED') || decision.tradeStatus === 'ENTRY READY' || decision.tradeStatus.includes('COMMITTED')) badge.classList.add('allowed');
+      else if(decision.tradeStatus.includes('ALLOWED') || isCommittableDecision(decision) || decision.tradeStatus.includes('COMMITTED')) badge.classList.add('allowed');
       else badge.classList.add('wait');
       badge.textContent = decision.tradeStatus;
     }
@@ -1221,7 +1232,7 @@
       icon.className = side === 'SHORT' ? 'ti ti-arrow-down' : 'ti ti-arrow-up';
       icon.style.color = side === 'SHORT' ? 'var(--red)' : 'var(--green)';
     }
-    if(time) time.textContent = decision.tradeStatus.includes('COMMITTED') ? 'Committed' : decision.tradeStatus === 'ENTRY READY' ? 'Ready' : 'Forming';
+    if(time) time.textContent = decision.tradeStatus.includes('COMMITTED') ? 'Committed' : isCommittableDecision(decision) ? `Ready ${decision.signalGrade.grade}` : 'Forming';
     if(clear) clear.style.display = decision.tradeStatus.includes('COMMITTED') ? 'inline-flex' : 'none';
     if(hint){
       const forecast = decision.nextStepForecast;
@@ -1376,7 +1387,7 @@
     wrap.innerHTML = rows.map(row => {
       const scoreClass = row.ready ? 'ready' : row.blocked ? 'blocked' : 'wait';
       const detail = row.entry
-        ? `${row.side || ''} entry ${fmtPrice(row.entry)} | SL ${fmtPrice(row.stopLoss)} | TP1 ${fmtPrice(row.tp1)} | R:R ${row.riskReward ? `1:${fmt(row.riskReward,2)}` : '-'}`
+        ? `${row.grade || '-'} ${row.side || ''} entry ${fmtPrice(row.entry)} | SL ${fmtPrice(row.stopLoss)} | TP1 ${fmtPrice(row.tp1)} | R:R ${row.riskReward ? `1:${fmt(row.riskReward,2)}` : '-'}`
         : `${row.bias} | ${row.setup || row.reason || row.stage}`;
       return `<div class="watchlist-row" data-symbol="${escapeHtml(row.symbol)}" title="Open ${escapeHtml(row.symbol)} chart">
         <div class="watch-symbol">${escapeHtml(row.symbol.replace('USDT',''))}</div>
@@ -1389,7 +1400,7 @@
     if(alertBox){
       alertBox.innerHTML = alerts.length
         ? `<b>${alerts.length} confirmed setup${alerts.length > 1 ? 's' : ''}:</b>${alerts.map(a =>
-            `<button type="button" data-symbol="${escapeHtml(a.symbol)}">${escapeHtml(a.symbol)} ${escapeHtml(a.side || '')} entry ${fmtPrice(a.entry)} | SL ${fmtPrice(a.stopLoss)} | TP1 ${fmtPrice(a.tp1)}</button>`
+            `<button type="button" data-symbol="${escapeHtml(a.symbol)}">${escapeHtml(a.symbol)} ${escapeHtml(a.grade || '')} ${escapeHtml(a.side || '')} entry ${fmtPrice(a.entry)} | SL ${fmtPrice(a.stopLoss)} | TP1 ${fmtPrice(a.tp1)}</button>`
           ).join('')}<div style="margin-top:6px">${escapeHtml(watchlistCommitSummary(rows))}</div>`
         : `Scanning ${loadWatchlistSymbols().length} configured Binance symbols. No confirmed trade right now.<div style="margin-top:6px">${escapeHtml(watchlistCommitSummary(rows))}</div>`;
     }
@@ -1422,14 +1433,48 @@
     let sent = {};
     try{ sent = JSON.parse(localStorage.getItem('goldpilotAlertedSetups') || '{}'); }catch(e){ sent = {}; }
     readyRows.forEach(row => {
+      commitWatchlistSignal(row);
       const key = `${new Date().toISOString().slice(0,10)}|${row.symbol}|${row.status}|${row.entry}|${row.stopLoss}|${row.tp1}`;
       if(sent[key]) return;
       sent[key] = Date.now();
-      const message = `${row.symbol}: ${row.status} ${row.side || ''} entry ${fmtPrice(row.entry)} SL ${fmtPrice(row.stopLoss)} TP1 ${fmtPrice(row.tp1)}`;
+      const message = `${row.symbol}: ${row.grade || ''} ${row.status} ${row.side || ''} entry ${fmtPrice(row.entry)} SL ${fmtPrice(row.stopLoss)} TP1 ${fmtPrice(row.tp1)}`;
       console.info('GoldPilot alert:', message);
       pushMobileAlert('GoldPilot setup ready', message, `watch|${key}`);
     });
     localStorage.setItem('goldpilotAlertedSetups', JSON.stringify(sent));
+  }
+
+  function commitWatchlistSignal(row){
+    if(!row || !row.committable || !row.plan) return null;
+    const signals = loadCommittedSignals();
+    const key = committedKey(row.symbol, '15M');
+    const signature = planSignature(row.plan);
+    const existing = signals[key];
+    if(existing && existing.active){
+      upsertDemoTradeFromSignal(existing);
+      return existing;
+    }
+    if(existing && !existing.active && existing.planSignature === signature) return null;
+    const signal = {
+      id:`${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      key,
+      active:true,
+      symbol:row.symbol,
+      timeframe:'15M',
+      timestamp:new Date().toISOString(),
+      setup:row.setupObj || {setup:row.setup, direction:row.side},
+      preferredDirection:row.side,
+      plan:row.plan,
+      planSignature:signature,
+      risk:row.risk || accountForSymbol(row.symbol),
+      signalGrade:{grade:row.grade, committable:true},
+      entryReadinessScore:row.score || 0,
+      reason:[row.reason || 'Watchlist committed setup']
+    };
+    signals[key] = signal;
+    saveCommittedSignals(signals);
+    upsertDemoTradeFromSignal(signal);
+    return signal;
   }
 
   function renderBottomBar(decision){

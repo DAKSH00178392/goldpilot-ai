@@ -1319,8 +1319,43 @@
       setupStage,
       missingConditions:[...new Set(missing)],
       entryReadinessScore:Math.round(clamp(score, 0, 100)),
+      directionalStructure,
+      directionalCandle,
       blockedReasons:[...new Set(blockedReasons)],
       allowedActions:[...new Set(allowedActions.length ? allowedActions : ['Wait'])]
+    };
+  }
+
+  function buildSignalGrade(setup, plan, risk, decisionState){
+    const hardReasons = [];
+    const softReasons = [];
+    if(!setup || !setup.direction) hardReasons.push('No directional setup');
+    if(!plan) hardReasons.push('No trade plan');
+    if(plan && plan.riskReward < CONFIG.minRiskReward) hardReasons.push('R:R below minimum');
+    if(risk && !risk.allowed) hardReasons.push('Risk engine blocked');
+    if(setup && setup.locationOk === false) hardReasons.push('Bad premium/discount location');
+    if(setup && setup.htfOk === false) hardReasons.push('HTF zone conflict');
+    if(setup && setup.cryptoOk === false) hardReasons.push('Crypto chase risk');
+    if(setup && setup.sessionOk === false) hardReasons.push('Session rule block');
+    if(decisionState && !decisionState.directionalStructure) hardReasons.push('Missing BOS/CHOCH');
+    if(decisionState && !decisionState.directionalCandle) hardReasons.push('Missing confirming candle');
+    if(setup && setup.volumeOk === false) softReasons.push('Volume confirmation weak');
+    if(setup && setup.trendOk === false) softReasons.push('Trend quality weak');
+    if(setup && setup.retestOk === false) softReasons.push('Retest is partial or shallow');
+
+    const score = decisionState ? decisionState.entryReadinessScore || 0 : 0;
+    const grade = hardReasons.length ? 'D'
+      : score >= 90 && !softReasons.length ? 'A+'
+        : score >= 80 && softReasons.length <= 1 ? 'A'
+          : score >= 70 && softReasons.length <= 1 ? 'B+'
+            : score >= 55 ? 'B'
+              : 'C';
+    return {
+      grade,
+      committable:['A+','A','B+'].includes(grade),
+      hardReasons,
+      softReasons,
+      summary:hardReasons[0] || softReasons[0] || 'All grade checks passed'
     };
   }
 
@@ -1605,6 +1640,7 @@
     const plan = buildTradePlan(candles, analysis, setup, liquidityMap);
     const risk = calculateRiskPermission(plan, context.account);
     const decisionState = evaluateDecisionState(analysis, setup, candleBehavior, tradability, risk, plan);
+    const signalGrade = buildSignalGrade(setup, plan, risk, decisionState);
     const directionalStructure = hasDirectionalStructure(analysis, setup.direction);
     const nextStepForecast = buildNextStepForecast(analysis, candleBehavior, bias, regime, liquidityMap, directional.long, directional.short);
 
@@ -1639,6 +1675,9 @@
     } else if(decisionState.setupStage === 'ENTRY_READY'){
       tradeStatus = 'ENTRY READY';
       reason.push(...setup.reasons, 'Entry trigger is ready, waiting for trader confirmation');
+    } else if(signalGrade.committable){
+      tradeStatus = `${signalGrade.grade} READY`;
+      reason.push(...setup.reasons, `${signalGrade.grade} grade setup is valid for demo commit`);
     } else if(setup.direction){
       tradeStatus = 'SETUP FORMING';
       reason.push(...(setup.reasons.length ? setup.reasons : ['Setup is forming']));
@@ -1672,13 +1711,14 @@
       shortSetup:directional.short,
       preferredDirection,
       setupStage:decisionState.setupStage,
+      signalGrade,
       missingConditions:decisionState.missingConditions,
       entryReadinessScore:decisionState.entryReadinessScore,
       blockedReasons:decisionState.blockedReasons,
       allowedActions:decisionState.allowedActions,
       entryTrigger:{
-        ready:tradeStatus.indexOf('ALLOWED') > -1 || tradeStatus === 'ENTRY READY',
-        type:setup.direction ? (directionalStructure ? `${setup.direction} BOS/CHOCH close confirmation` : 'Sweep/retest watch') : null
+        ready:tradeStatus.indexOf('ALLOWED') > -1 || tradeStatus === 'ENTRY READY' || signalGrade.committable,
+        type:setup.direction ? `${signalGrade.grade} grade | ${directionalStructure ? `${setup.direction} BOS/CHOCH close confirmation` : 'Sweep/retest watch'}` : null
       },
       tradePlan:plan,
       risk,
