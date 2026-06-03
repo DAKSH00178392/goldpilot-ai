@@ -128,6 +128,7 @@ ok(connectorJs.includes('isTradingNewsTitle'), 'live connector filters headlines
 ok(connectorJs.includes('binance.com/bapi/composite'), 'live connector uses Binance announcements feed');
 ok(connectorJs.includes('displayNewsEvents'), 'dashboard renders live plus manual news events');
 ok(connectorJs.includes('WATCHLIST_SYMBOLS'), 'live connector scans configured crypto watchlist');
+ok(connectorJs.includes('monitorScore'), 'watchlist shows monitoring score even when no setup is active');
 ok(connectorJs.includes('Notification'), 'live connector can notify confirmed trades');
 ok(connectorJs.includes('setPrimarySymbol'), 'live connector can switch focused symbol');
 ok(connectorJs.includes('scrollIntoView'), 'live connector wires navbar section navigation');

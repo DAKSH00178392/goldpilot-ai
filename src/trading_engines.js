@@ -969,6 +969,10 @@
         setup = 'Range low reversal watch';
         reasons.push('Range conditions can support a long only after sell-side sweep');
         needs.push('Sweep range low and close back inside');
+      } else if(bias.bias === 'Bullish' && locationOk && trendQuality && trendQuality.score >= 45){
+        setup = 'Demand pullback watch';
+        reasons.push('Bullish context supports watching for demand pullback');
+        needs.push('Wait for demand/FVG reaction plus bullish BOS/CHOCH close');
       } else {
         needs.push('Wait for sell-side sweep, bullish BOS, or demand reaction');
       }
@@ -990,6 +994,10 @@
         setup = 'Range high reversal watch';
         reasons.push('Range conditions can support a short only after buy-side sweep');
         needs.push('Sweep range high and close back inside');
+      } else if(bias.bias === 'Bearish' && locationOk && trendQuality && trendQuality.score >= 45){
+        setup = 'Supply pullback watch';
+        reasons.push('Bearish context supports watching for supply pullback');
+        needs.push('Wait for supply/FVG reaction plus bearish BOS/CHOCH close');
       } else {
         needs.push('Wait for buy-side sweep, bearish BOS, or supply reaction');
       }

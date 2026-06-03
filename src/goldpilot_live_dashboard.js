@@ -866,11 +866,17 @@
         : preferredCandidate && preferredCandidate.setup
           ? preferredCandidate.setup
           : decision.regime.regime;
+      const monitorScore = Math.max(
+        decision.entryReadinessScore || 0,
+        decision.longSetup ? decision.longSetup.entryReadinessScore || 0 : 0,
+        decision.shortSetup ? decision.shortSetup.entryReadinessScore || 0 : 0,
+        decision.preferredDirection === 'NONE' && decision.nextStepForecast ? Math.min(45, decision.nextStepForecast.confidence || 0) : 0
+      );
       return {
         symbol,
         status:decision.tradeStatus,
         stage:decision.setupStage,
-        score:decision.entryReadinessScore || 0,
+        score:monitorScore,
         bias:decision.bias ? decision.bias.bias : '-',
         setup,
         side:plan ? plan.side : decision.preferredDirection,
