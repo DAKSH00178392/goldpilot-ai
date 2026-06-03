@@ -891,7 +891,7 @@
         riskReward:plan ? plan.riskReward : null,
         ready:decision.tradeStatus === 'ENTRY READY' || decision.tradeStatus.includes('ALLOWED'),
         blocked:decision.tradeStatus === 'BLOCKED',
-        reason:(decision.reason || decision.nextConditionNeeded || []).slice(0,2).join(' ')
+        reason:[...(decision.missingConditions || []), ...(decision.nextConditionNeeded || []), ...(decision.reason || [])].slice(0,2).join(' ')
       };
     } catch(err){
       return {symbol, status:'DATA ERROR', stage:'ERROR', score:0, bias:'-', setup:err.message, ready:false, blocked:true};
@@ -1390,9 +1390,30 @@
       alertBox.innerHTML = alerts.length
         ? `<b>${alerts.length} confirmed setup${alerts.length > 1 ? 's' : ''}:</b>${alerts.map(a =>
             `<button type="button" data-symbol="${escapeHtml(a.symbol)}">${escapeHtml(a.symbol)} ${escapeHtml(a.side || '')} entry ${fmtPrice(a.entry)} | SL ${fmtPrice(a.stopLoss)} | TP1 ${fmtPrice(a.tp1)}</button>`
-          ).join('')}`
-        : `Scanning ${loadWatchlistSymbols().length} configured Binance symbols. No confirmed trade right now.`;
+          ).join('')}<div style="margin-top:6px">${escapeHtml(watchlistCommitSummary(rows))}</div>`
+        : `Scanning ${loadWatchlistSymbols().length} configured Binance symbols. No confirmed trade right now.<div style="margin-top:6px">${escapeHtml(watchlistCommitSummary(rows))}</div>`;
     }
+  }
+
+  function dateKey(value){
+    const d = value ? new Date(value) : new Date();
+    if(isNaN(d.getTime())) return '';
+    return d.toISOString().slice(0, 10);
+  }
+
+  function watchlistCommitSummary(rows){
+    const today = dateKey();
+    const demoCommittedToday = loadDemoTrades().filter(row => dateKey(row.openedAt || row.createdAt) === today).length;
+    const activeCommitted = Object.values(loadCommittedSignals()).filter(signal => signal && signal.active).length;
+    const best = rows
+      .filter(row => row && !row.ready)
+      .sort((a,b) => (b.score || 0) - (a.score || 0))[0] || null;
+    if(!best){
+      return `Committed today: ${demoCommittedToday} | Active committed: ${activeCommitted} | No watchlist scan result yet.`;
+    }
+    const side = best.side && best.side !== 'NONE' ? ` ${best.side}` : '';
+    const blocker = best.reason || best.setup || best.stage || 'Waiting for cleaner setup';
+    return `Committed today: ${demoCommittedToday} | Active committed: ${activeCommitted} | Best forming: ${best.symbol}${side} ${best.score}% | ${blocker}`;
   }
 
   function notifyConfirmedTrades(rows){

@@ -136,6 +136,9 @@ ok(connectorJs.includes('binance.com/bapi/composite'), 'live connector uses Bina
 ok(connectorJs.includes('displayNewsEvents'), 'dashboard renders live plus manual news events');
 ok(connectorJs.includes('WATCHLIST_SYMBOLS'), 'live connector scans configured crypto watchlist');
 ok(connectorJs.includes('monitorScore'), 'watchlist shows monitoring score even when no setup is active');
+ok(connectorJs.includes('watchlistCommitSummary'), 'watchlist explains why no trade committed');
+ok(connectorJs.includes('Committed today'), 'watchlist summary shows committed trade count');
+ok(connectorJs.includes('Best forming'), 'watchlist summary shows best forming setup');
 ok(connectorJs.includes('Notification'), 'live connector can notify confirmed trades');
 ok(connectorJs.includes('setPrimarySymbol'), 'live connector can switch focused symbol');
 ok(connectorJs.includes('scrollIntoView'), 'live connector wires navbar section navigation');
