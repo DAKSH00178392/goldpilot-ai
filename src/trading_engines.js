@@ -1364,6 +1364,64 @@
     return side === 'LONG' ? targetPrice - entry : entry - targetPrice;
   }
 
+  function addTargetCandidate(targets, side, entry, target){
+    if(!target || target.price == null || !isFinite(target.price)) return;
+    const reward = rewardDistance(side, entry, target.price);
+    if(reward <= 0) return;
+    if(targets.some(t => Math.abs(t.price - target.price) / (entry || 1) < 0.00035)) return;
+    targets.push(Object.assign({weight:50}, target, {rewardDistance:reward}));
+  }
+
+  function buildTargetCandidates(candles, analysis, side, entry, liquidityMap, atr){
+    const targets = [];
+    const recent30High = recentHigh(candles, 30);
+    const recent30Low = recentLow(candles, 30);
+    const recent80High = recentHigh(candles, Math.min(80, candles.length));
+    const recent80Low = recentLow(candles, Math.min(80, candles.length));
+    const step = roundNumberStep(entry);
+    const roundBelow = Math.floor(entry / step) * step;
+    const roundAbove = roundBelow + step;
+
+    for(const level of liquidityMap.nearest || []){
+      addTargetCandidate(targets, side, entry, {
+        name:level.name || level.type || 'Nearby liquidity',
+        type:level.type || 'liquidity',
+        price:level.price,
+        weight:level.touches ? 55 + Math.min(level.touches * 5, 20) : 50
+      });
+    }
+
+    if(side === 'LONG'){
+      addTargetCandidate(targets, side, entry, {name:'Recent swing high', type:'structure', price:recent30High, weight:62});
+      addTargetCandidate(targets, side, entry, {name:'Major range high', type:'range-extreme', price:recent80High, weight:74});
+      addTargetCandidate(targets, side, entry, {name:'Round number above', type:'round-number', price:roundAbove, weight:58});
+      addTargetCandidate(targets, side, entry, {name:'Extended round number above', type:'round-number', price:roundAbove + step, weight:48});
+    } else {
+      addTargetCandidate(targets, side, entry, {name:'Recent swing low', type:'structure', price:recent30Low, weight:62});
+      addTargetCandidate(targets, side, entry, {name:'Major range low', type:'range-extreme', price:recent80Low, weight:74});
+      addTargetCandidate(targets, side, entry, {name:'Round number below', type:'round-number', price:roundBelow, weight:58});
+      addTargetCandidate(targets, side, entry, {name:'Extended round number below', type:'round-number', price:roundBelow - step, weight:48});
+    }
+
+    const zones = (analysis.zones && analysis.zones.zones || []).slice(-10);
+    for(const z of zones){
+      if(side === 'LONG' && z.dir === 'supply'){
+        addTargetCandidate(targets, side, entry, {name:'Supply zone target', type:'supply', price:z.low, weight:66});
+      }
+      if(side === 'SHORT' && z.dir === 'demand'){
+        addTargetCandidate(targets, side, entry, {name:'Demand zone target', type:'demand', price:z.high, weight:66});
+      }
+    }
+
+    const minDistance = atr * 0.15;
+    return targets
+      .filter(t => t.rewardDistance > minDistance)
+      .map(t => Object.assign({}, t, {
+        significance:t.weight + Math.min((t.rewardDistance / (atr || entry * 0.002)) * 4, 28)
+      }))
+      .sort((a,b) => a.rewardDistance - b.rewardDistance);
+  }
+
   function buildTradePlan(candles, analysis, setup, liquidityMap){
     if(!setup.direction) return null;
     const last = candles[candles.length-1];
@@ -1375,36 +1433,14 @@
       ? {source:'Fallback swing low', price:findRecentLow(candles) - atr * 0.15, reason:'Below recent swing/sweep low'}
       : {source:'Fallback swing high', price:findRecentHigh(candles) + atr * 0.15, reason:'Above recent swing/sweep high'};
     if(!stopCandidates.length) stopCandidates.push(fallbackStop);
-    const minTargetDistance = atr * 0.15;
-    const directionalTargets = (liquidityMap.nearest || []).filter(l => {
-      return rewardDistance(side, entry, l.price) > minTargetDistance;
-    }).sort((a,b) => {
-      const ar = rewardDistance(side, entry, a.price);
-      const br = rewardDistance(side, entry, b.price);
-      return ar - br;
-    });
-    const swingTarget = side === 'LONG'
-      ? {name:'Recent swing high', type:'structure', price:findRecentHigh(candles)}
-      : {name:'Recent swing low', type:'structure', price:findRecentLow(candles)};
-    if(swingTarget.price){
-      const swingReward = rewardDistance(side, entry, swingTarget.price);
-      if(swingReward > minTargetDistance && !directionalTargets.some(t => Math.abs(t.price - swingTarget.price) / entry < 0.0005)){
-        directionalTargets.push(swingTarget);
-        directionalTargets.sort((a,b) => {
-          const ar = rewardDistance(side, entry, a.price);
-          const br = rewardDistance(side, entry, b.price);
-          return ar - br;
-        });
-      }
-    }
-    const firstTarget = directionalTargets[0] || null;
-    const secondTarget = directionalTargets[1] || null;
-    const tp1 = firstTarget ? firstTarget.price : null;
-    const tp2 = secondTarget ? secondTarget.price : tp1;
+    const allTargets = buildTargetCandidates(candles, analysis, side, entry, liquidityMap, atr);
     const evaluatedStops = stopCandidates.map(candidate => {
       const riskDistance = Math.abs(entry - candidate.price);
-      const rr = riskDistance && tp1 != null ? Math.abs(tp1 - entry) / riskDistance : 0;
-      return Object.assign({}, candidate, {riskDistance, rr});
+      const actionableTargets = allTargets.filter(target => target.rewardDistance / riskDistance >= CONFIG.minRiskReward);
+      const minorTargets = allTargets.filter(target => target.rewardDistance / riskDistance < CONFIG.minRiskReward);
+      const selectedTarget = actionableTargets[0] || allTargets[0] || null;
+      const rr = riskDistance && selectedTarget ? selectedTarget.rewardDistance / riskDistance : 0;
+      return Object.assign({}, candidate, {riskDistance, rr, selectedTarget, actionableTargets, minorTargets});
     }).sort((a,b) => {
       const aPass = a.rr >= CONFIG.minRiskReward ? 1 : 0;
       const bPass = b.rr >= CONFIG.minRiskReward ? 1 : 0;
@@ -1415,12 +1451,19 @@
     const stop = selectedStop.price;
     const invalidationReason = selectedStop.reason;
     const riskDistance = Math.abs(entry - stop);
-    const rr = riskDistance && tp1 != null ? Math.abs(tp1 - entry) / riskDistance : 0;
+    const actionableTargets = selectedStop.actionableTargets || [];
+    const minorTargets = selectedStop.minorTargets || [];
+    const firstTarget = actionableTargets[0] || selectedStop.selectedTarget || null;
+    const secondTarget = actionableTargets[1] || allTargets.find(t => firstTarget && t.price !== firstTarget.price && t.rewardDistance > firstTarget.rewardDistance) || null;
+    const tp1 = firstTarget ? firstTarget.price : null;
+    const tp2 = secondTarget ? secondTarget.price : tp1;
+    const rr = riskDistance && firstTarget ? rewardDistance(side, entry, firstTarget.price) / riskDistance : 0;
     const digits = priceDigits(entry);
     const targetQuality = !firstTarget ? 'No confirmed target'
       : rr < CONFIG.minRiskReward ? 'Targets too close for valid R:R'
-        : secondTarget ? 'Two valid market targets'
-          : 'Single valid market target';
+        : firstTarget.type === 'range-extreme' || firstTarget.type === 'supply' || firstTarget.type === 'demand' ? 'Major market target'
+          : secondTarget ? 'Two valid market targets'
+            : 'Single valid market target';
     return {
       side,
       entryZone: [round(entry - atr * 0.1,digits), round(entry + atr * 0.1,digits)],
@@ -1437,15 +1480,22 @@
         stopLoss:round(candidate.price,digits),
         riskReward:round(candidate.rr,2)
       })),
-      targetCandidates:directionalTargets.slice(0, 4).map(target => ({
+      targetCandidates:allTargets.slice(0, 6).map(target => ({
         source:target.name || target.type || 'Market target',
         price:round(target.price,digits),
-        rewardDistance:round(rewardDistance(side, entry, target.price), digits)
+        rewardDistance:round(target.rewardDistance,digits),
+        requiredReward:round(riskDistance * CONFIG.minRiskReward,digits),
+        actionable:target.rewardDistance >= riskDistance * CONFIG.minRiskReward
+      })),
+      minorTargets:minorTargets.slice(0, 4).map(target => ({
+        source:target.name || target.type || 'Minor target',
+        price:round(target.price,digits),
+        riskReward:round(riskDistance ? target.rewardDistance / riskDistance : 0, 2)
       })),
       targetQuality,
       targetSource:firstTarget ? firstTarget.name || firstTarget.type || 'Market target' : 'No market target',
       targetWarning:firstTarget
-        ? (rr >= CONFIG.minRiskReward ? 'Market target supports required R:R' : `Nearest real target is too close: reward only 1:${round(rr,2)}. Wait for deeper retest or a clearer lower/higher liquidity target.`)
+        ? (rr >= CONFIG.minRiskReward ? `Target hierarchy found actionable ${firstTarget.name || firstTarget.type} with 1:${round(rr,2)} R:R` : `All real targets are too close: best reward only 1:${round(rr,2)}. Wait for deeper retest or a clearer lower/higher liquidity target.`)
         : 'No valid directional liquidity/structure target found',
       marketTargetBased:true
     };

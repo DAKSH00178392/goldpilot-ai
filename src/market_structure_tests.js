@@ -86,7 +86,12 @@ ok(engineSource.includes('Session rules block this setup type'), 'engine blocks 
 ok(engineSource.includes('targetCandidates'), 'trade plan exposes real target candidates');
 ok(engineSource.includes('targetQuality'), 'trade plan labels TP target quality');
 ok(engineSource.includes('Targets too close for valid R:R'), 'trade plan labels close targets as invalid reward');
-ok(engineSource.includes('Nearest real target is too close'), 'trade plan explains when TP is real but reward is too small');
+ok(engineSource.includes('buildTargetCandidates'), 'trade plan builds hierarchical target candidates');
+ok(engineSource.includes('Major range high'), 'target hierarchy includes major range highs');
+ok(engineSource.includes('Major range low'), 'target hierarchy includes major range lows');
+ok(engineSource.includes('Extended round number'), 'target hierarchy includes extended round-number targets');
+ok(engineSource.includes('All real targets are too close'), 'trade plan explains when all TPs are real but reward is too small');
+ok(engineSource.includes('minorTargets'), 'trade plan separates minor targets from actionable targets');
 ok(engineSource.includes('WATCH_ONLY'), 'engine demotes invalid R:R setup candidates to watch-only');
 ok(engineSource.includes('Watch only: reward is too small'), 'engine explains invalid reward as watch-only');
 
