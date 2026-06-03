@@ -522,7 +522,12 @@
     if(preferred && preferred.setup) return preferred;
     return [decision.longSetup, decision.shortSetup]
       .filter(c => c && c.setup)
-      .sort((a,b) => (b.entryReadinessScore || 0) - (a.entryReadinessScore || 0))[0] || null;
+      .sort((a,b) => {
+        const aValid = a.tradePlan && a.tradePlan.riskReward >= 2 ? 1 : 0;
+        const bValid = b.tradePlan && b.tradePlan.riskReward >= 2 ? 1 : 0;
+        if(aValid !== bValid) return bValid - aValid;
+        return (b.entryReadinessScore || 0) - (a.entryReadinessScore || 0);
+      })[0] || null;
   }
 
   function displayTradePlan(decision){
@@ -1226,7 +1231,9 @@
         : (decision.nextConditionNeeded || decision.reason || ['Wait for confirmed setup.']).join(' ');
       hint.textContent += targetNote;
     }
-    if(zone) zone.textContent = plan && plan.entryZone ? `${fmtPrice(plan.entryZone[0])} - ${fmtPrice(plan.entryZone[1])}` : '-';
+    if(zone) zone.textContent = plan && plan.entryZone
+      ? (planHasValidReward ? `${fmtPrice(plan.entryZone[0])} - ${fmtPrice(plan.entryZone[1])}` : 'NO ENTRY - TARGET TOO CLOSE')
+      : '-';
     if(values[0]) values[0].textContent = plan ? (planHasValidReward ? fmtPrice(plan.takeProfit.tp1) : `Wait (${fmtPrice(plan.takeProfit.tp1)})`) : '-';
     if(values[1]) values[1].textContent = plan ? fmtPrice(plan.invalidation) : '-';
     if(values[2]) values[2].textContent = plan ? (planHasValidReward ? fmtPrice(plan.takeProfit.tp2) : `Wait (${fmtPrice(plan.takeProfit.tp2)})`) : '-';

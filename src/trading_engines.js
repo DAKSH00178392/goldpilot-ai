@@ -1095,7 +1095,7 @@
 
   function choosePreferredDirection(longSetup, shortSetup){
     const candidates = [longSetup, shortSetup]
-      .filter(c => c && c.setup && c.setupStage !== 'BLOCKED')
+      .filter(c => c && c.setup && c.setupStage !== 'BLOCKED' && c.tradePlan && c.tradePlan.riskReward >= CONFIG.minRiskReward)
       .sort((a,b) => (b.entryReadinessScore || 0) - (a.entryReadinessScore || 0));
     if(!candidates.length) return 'NONE';
     if((candidates[0].entryReadinessScore || 0) < 25) return 'NONE';
@@ -1282,6 +1282,7 @@
     if(plan && plan.riskReward >= CONFIG.minRiskReward){
       score += 15;
     } else if(plan){
+      score -= 20;
       missing.push(`R:R below ${CONFIG.minRiskReward}`);
     }
 
@@ -1302,9 +1303,12 @@
     if(plan && setup.direction && engineGatesOk && directionalStructure && directionalCandle && score >= entryThreshold && risk.allowed){
       setupStage = 'ENTRY_READY';
       allowedActions.push('Trade can be considered after manual confirmation');
-    } else if(plan && setup.direction && score >= 55){
+    } else if(plan && setup.direction && score >= 55 && plan.riskReward >= CONFIG.minRiskReward){
       setupStage = 'RETEST_NEEDED';
       allowedActions.push('Wait for retest or cleaner trigger');
+    } else if(plan && setup.direction && plan.riskReward < CONFIG.minRiskReward){
+      setupStage = 'WATCH_ONLY';
+      allowedActions.push('Watch only: reward is too small for live/demo entry');
     }
 
     if(!missing.length && setup.needsConfirmation && setup.needsConfirmation.length && setupStage !== 'ENTRY_READY'){
@@ -1562,9 +1566,13 @@
       reason.push(...tradability.reasons);
       nextConditionNeeded.push('Wait until news/spread/volatility conditions normalize');
     } else if(!setup.direction){
-      if(setup.setup) tradeStatus = 'SETUP FORMING';
+      if(setup.setup) tradeStatus = 'WATCH ONLY';
       reason.push('No valid setup is confirmed');
       nextConditionNeeded.push(...(setup.needsConfirmation.length ? setup.needsConfirmation : ['Wait for sweep, BOS/CHOCH, or retest confirmation']));
+    } else if(decisionState.setupStage === 'WATCH_ONLY'){
+      tradeStatus = 'WATCH ONLY';
+      reason.push(...(setup.reasons.length ? setup.reasons : ['Setup is watch-only']));
+      nextConditionNeeded.push(...decisionState.missingConditions);
     } else if(!directionalStructure){
       tradeStatus = 'SETUP FORMING';
       reason.push('Setup is forming, but matching structure confirmation is not complete');

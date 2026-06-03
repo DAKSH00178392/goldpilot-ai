@@ -30,7 +30,7 @@ const decision = engines.analyzeGoldPilot({
 });
 console.log('GoldPilot decision summary:', {status: decision.tradeStatus, bias: decision.bias.bias, regime: decision.regime.regime});
 ok(decision.product === 'GoldPilot AI', 'GoldPilot decision identifies product');
-ok(['ALLOWED','WAIT','BLOCKED','SETUP FORMING','ENTRY READY'].some(s => decision.tradeStatus.includes(s)), 'GoldPilot decision has professional decision status');
+ok(['ALLOWED','WAIT','BLOCKED','SETUP FORMING','ENTRY READY','WATCH ONLY'].some(s => decision.tradeStatus.includes(s)), 'GoldPilot decision has professional decision status');
 ok(decision.tradability && decision.regime && decision.liquidityMap && decision.risk, 'GoldPilot decision returns tradability/regime/liquidity/risk');
 ok(decision.locationContext && decision.locationContext.range && decision.locationContext.range.zone, 'GoldPilot decision returns premium/discount location context');
 ok(decision.volumeContext && typeof decision.volumeContext.score === 'number', 'GoldPilot decision returns volume confirmation context');
@@ -87,6 +87,8 @@ ok(engineSource.includes('targetCandidates'), 'trade plan exposes real target ca
 ok(engineSource.includes('targetQuality'), 'trade plan labels TP target quality');
 ok(engineSource.includes('Targets too close for valid R:R'), 'trade plan labels close targets as invalid reward');
 ok(engineSource.includes('Nearest real target is too close'), 'trade plan explains when TP is real but reward is too small');
+ok(engineSource.includes('WATCH_ONLY'), 'engine demotes invalid R:R setup candidates to watch-only');
+ok(engineSource.includes('Watch only: reward is too small'), 'engine explains invalid reward as watch-only');
 
 // 4) High-impact USD news blocks new trades
 const blocked = engines.analyzeGoldPilot({
@@ -170,6 +172,7 @@ ok(connectorJs.includes('decision.htfAlignment'), 'dashboard displays HTF zone a
 ok(connectorJs.includes('decision.sessionRules'), 'dashboard displays session rule checks');
 ok(connectorJs.includes('Retest:'), 'dashboard displays retest quality checks');
 ok(connectorJs.includes('planHasValidReward'), 'dashboard marks TP levels as wait-only when R:R is invalid');
+ok(connectorJs.includes('NO ENTRY - TARGET TOO CLOSE'), 'dashboard hides actionable entry zone when reward is invalid');
 
 // 6) Return success
 console.log('\nAll market structure smoke tests passed.');
