@@ -153,6 +153,7 @@ ok(connectorJs.includes('ensurePrimarySymbolOption'), 'watchlist symbols can be 
 ok(connectorJs.includes('accountForSymbol'), 'dashboard uses symbol-aware Binance spot risk sizing');
 ok(connectorJs.includes("tickValuePerLot:1"), 'Binance spot symbols use quantity value of 1 for risk sizing');
 ok(connectorJs.includes('bestSetupCandidate'), 'dashboard uses best setup candidate when primary setup is empty');
+ok(connectorJs.includes('displayReadinessScore'), 'dashboard uses consistent best-candidate readiness score');
 ok(connectorJs.includes('displayTradePlan'), 'dashboard displays fallback candidate trade plan');
 ok(connectorJs.includes("setPrimarySymbol(row.getAttribute('data-symbol'), '15M')"), 'watchlist opens matching 15M focused dashboard');
 ok(connectorJs.includes('renderPriceAxis'), 'dashboard chart renders price axis and current price marker');

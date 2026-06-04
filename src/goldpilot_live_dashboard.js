@@ -535,6 +535,16 @@
       })[0] || null;
   }
 
+  function displayReadinessScore(decision){
+    const candidate = bestSetupCandidate(decision);
+    return Math.max(
+      decision.entryReadinessScore || 0,
+      candidate ? candidate.entryReadinessScore || 0 : 0,
+      decision.longSetup ? decision.longSetup.entryReadinessScore || 0 : 0,
+      decision.shortSetup ? decision.shortSetup.entryReadinessScore || 0 : 0
+    );
+  }
+
   function displayTradePlan(decision){
     const candidate = bestSetupCandidate(decision);
     return decision.tradePlan || (candidate && candidate.tradePlan) || null;
@@ -945,7 +955,7 @@
   }
 
   function renderDecisionState(decision){
-    const score = decision.entryReadinessScore || 0;
+    const score = displayReadinessScore(decision);
     const badge = qs('#status-badge');
     if(badge && isCommittableDecision(decision)) badge.classList.add('allowed');
     const setupEl = qsa('.status-row > div')[1];
@@ -969,8 +979,9 @@
     }
 
     const setup = displaySetup(decision);
+    const score = displayReadinessScore(decision);
     const setupText = setup && setup.setup
-      ? `${setup.setup} (${setup.quality || 'Watch'})`
+      ? `${setup.setup} (${setup.quality || 'Watch'}) | readiness ${score}%`
       : 'No valid setup confirmed';
     const setupEl = qsa('.status-row > div')[1];
     if(setupEl){
@@ -1359,7 +1370,7 @@
       {ok: decision.preferredDirection !== 'NONE', label: `Preferred direction: ${decision.preferredDirection || 'NONE'}`},
       {ok: !!decision.nextStepForecast, label: decision.nextStepForecast ? `Next step: ${decision.nextStepForecast.leadDirection} ${decision.nextStepForecast.confidence}%` : 'Next-step read'},
       {ok: !missing.some(m => /BOS|CHOCH/i.test(m)), label: 'BOS/CHOCH confirmation'},
-      {ok: decision.entryTrigger.ready, label: `Entry trigger ready (${decision.entryReadinessScore || 0}%)`},
+      {ok: decision.entryTrigger.ready, label: `Entry trigger ready (${displayReadinessScore(decision)}%)`},
       {ok: !!plan && plan.riskReward >= 2, label: 'R:R minimum 1:2'},
       {ok: decision.risk.allowed, label: 'Risk permission'}
     ];
