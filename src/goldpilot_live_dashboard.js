@@ -269,6 +269,22 @@
     localStorage.setItem('goldpilotCommittedSignals', JSON.stringify(signals || {}));
   }
 
+  function closeCommittedSignalForDemo(row){
+    if(!row || !row.signalId) return;
+    const signals = loadCommittedSignals();
+    let changed = false;
+    Object.keys(signals).forEach(key => {
+      const signal = signals[key];
+      if(!signal || signal.id !== row.signalId || !signal.active) return;
+      signal.active = false;
+      signal.exitState = row.result || 'CLOSED';
+      signal.closedAt = row.closedAt || new Date().toISOString();
+      signal.exitPrice = row.exitPrice;
+      changed = true;
+    });
+    if(changed) saveCommittedSignals(signals);
+  }
+
   function loadDemoTrades(){
     try{
       const rows = JSON.parse(localStorage.getItem('goldpilotDemoTrades') || '[]');
@@ -313,6 +329,32 @@
     const candles = candlesByTimeframe[activeTimeframe] || candlesByTimeframe['15M'] || [];
     const latestCandle = candles[candles.length - 1];
     return latestTicker && latestTicker.last ? latestTicker.last : latestCandle ? latestCandle.c : null;
+  }
+
+  async function fetchSymbolLastPrice(symbol){
+    const normalized = String(symbol || '').toUpperCase();
+    if(!normalized) return null;
+    if(normalized === CONFIG.symbol){
+      const current = currentMarketPrice();
+      if(current != null) return current;
+    }
+    const ticker = await fetchJson(`https://api.binance.com/api/v3/ticker/price?symbol=${normalized}`);
+    return Number(ticker.price);
+  }
+
+  async function demoTradePrices(rows){
+    const openSymbols = [...new Set((rows || [])
+      .filter(row => row && row.status !== 'CLOSED')
+      .map(row => String(row.symbol || '').toUpperCase())
+      .filter(Boolean))];
+    const pairs = await Promise.allSettled(openSymbols.map(async symbol => [symbol, await fetchSymbolLastPrice(symbol)]));
+    const prices = {};
+    pairs.forEach(result => {
+      if(result.status !== 'fulfilled') return;
+      const [symbol, price] = result.value;
+      if(isFinite(price)) prices[symbol] = price;
+    });
+    return prices;
   }
 
   function signalExitState(signal, price){
@@ -378,17 +420,17 @@
     return row;
   }
 
-  function updateDemoTrades(){
-    const price = currentMarketPrice();
-    if(price == null) return;
+  async function updateDemoTrades(){
     const rows = loadDemoTrades();
+    const prices = await demoTradePrices(rows);
     let changed = false;
     rows.forEach(row => {
       if(row.status === 'CLOSED'){
         if(settleDemoBalance(row)) changed = true;
         return;
       }
-      if(row.symbol !== CONFIG.symbol) return;
+      const price = prices[String(row.symbol || '').toUpperCase()];
+      if(price == null) return;
       const previousStatus = row.status;
       const pnl = demoTradePnl(row, price);
       row.pnl = roundLocal(pnl, 4);
@@ -416,6 +458,7 @@
         row.closedAt = new Date().toISOString();
         row.exitPrice = exitPrice;
         settleDemoBalance(row);
+        closeCommittedSignalForDemo(row);
       };
       if(row.side === 'LONG'){
         if(row.status === 'TP1_HIT' && price <= row.entry){ closeRemaining('BREAKEVEN', row.entry); }
@@ -856,6 +899,7 @@
         newsSourceStatus = liveNewsEvents.length ? 'Cached' : 'Manual';
       })
     ]);
+    await updateDemoTrades();
     const decision = buildDecision();
     renderDashboard(decision);
     setConnection('LIVE', 'var(--green)');
@@ -999,7 +1043,6 @@
   function renderDashboard(decision){
     const freshCommit = commitDecision(decision);
     const activeCommit = freshCommit || loadActiveCommittedSignal();
-    updateDemoTrades();
     decision = applyCommittedSignal(decision, activeCommit);
     lastDecision = decision;
     renderHero(decision);
@@ -1018,6 +1061,12 @@
     appendJournalSnapshot(decision, 'auto');
     populateTradeSignalSelect();
     renderTradeJournal();
+    updateDemoTrades()
+      .then(() => {
+        renderDemoTrades();
+        if(lastDecision) renderRisk(lastDecision);
+      })
+      .catch(err => console.warn('demo trade update failed', err));
   }
 
   function renderDecisionState(decision){

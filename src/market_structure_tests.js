@@ -182,6 +182,9 @@ ok(connectorJs.includes('upsertDemoTradeFromSignal'), 'committed signals open de
 ok(connectorJs.includes('isCommittableDecision'), 'dashboard commits A/A+/B+ grade decisions');
 ok(connectorJs.includes('commitWatchlistSignal'), 'watchlist can commit ready signals across all scanned symbols');
 ok(connectorJs.includes('updateDemoTrades'), 'demo trades update against live price for TP/SL/PnL');
+ok(connectorJs.includes('fetchSymbolLastPrice'), 'demo trades fetch prices for each open symbol');
+ok(connectorJs.includes('demoTradePrices'), 'demo trades build cross-symbol price map');
+ok(connectorJs.includes('closeCommittedSignalForDemo'), 'closed demo trades deactivate matching committed signal');
 ok(connectorJs.includes('settleDemoBalance'), 'closed demo trades settle realized PnL into account balance');
 ok(connectorJs.includes("if(row.status === 'CLOSED')"), 'already-closed demo trades are settled after refresh');
 ok(connectorJs.includes('openQuantity'), 'demo trades track open quantity after TP1 partial close');
