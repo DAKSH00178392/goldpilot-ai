@@ -140,6 +140,9 @@ ok(connectorJs.includes('isTradingNewsTitle'), 'live connector filters headlines
 ok(connectorJs.includes('binance.com/bapi/composite'), 'live connector uses Binance announcements feed');
 ok(connectorJs.includes('displayNewsEvents'), 'dashboard renders live plus manual news events');
 ok(connectorJs.includes('WATCHLIST_SYMBOLS'), 'live connector scans configured crypto watchlist');
+ok(connectorJs.includes("'4H':confirmedH4"), 'watchlist scan includes 4H context');
+ok(connectorJs.includes("'D':confirmedD1"), 'watchlist scan includes daily context');
+ok(connectorJs.includes('formatAge'), 'watchlist displays scan age to avoid stale-row confusion');
 ok(connectorJs.includes('monitorScore'), 'watchlist shows monitoring score even when no setup is active');
 ok(connectorJs.includes('watchlistCommitSummary'), 'watchlist explains why no trade committed');
 ok(connectorJs.includes('Committed today'), 'watchlist summary shows committed trade count');

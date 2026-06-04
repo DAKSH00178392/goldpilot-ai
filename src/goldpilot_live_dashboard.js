@@ -862,15 +862,19 @@
 
   async function scanWatchSymbol(symbol){
     try{
-      const [m15, h1] = await Promise.all([
+      const [m15, h1, h4, d1] = await Promise.all([
         fetchKlines('15m', 180, symbol),
-        fetchKlines('1h', 180, symbol)
+        fetchKlines('1h', 180, symbol),
+        fetchKlines('4h', 120, symbol),
+        fetchKlines('1d', 90, symbol)
       ]);
       const confirmedM15 = confirmedCandles(m15);
       const confirmedH1 = confirmedCandles(h1);
+      const confirmedH4 = confirmedCandles(h4);
+      const confirmedD1 = confirmedCandles(d1);
       const decision = window.TradingEngines.analyzeGoldPilot({
         candles:confirmedM15,
-        timeframes:{'15M':confirmedM15,'1H':confirmedH1},
+        timeframes:{'15M':confirmedM15,'1H':confirmedH1,'4H':confirmedH4,'D':confirmedD1},
         account:accountForSymbol(symbol),
         market:{spread:0},
         newsEvents:loadManualNewsEvents()
@@ -909,6 +913,7 @@
         plan,
         risk:decision.risk,
         setupObj:decision.setup,
+        scannedAt:Date.now(),
         ready:isCommittableDecision(decision),
         blocked:decision.tradeStatus === 'BLOCKED',
         reason:[...(decision.missingConditions || []), ...(decision.nextConditionNeeded || []), ...(decision.reason || [])].slice(0,2).join(' ')
@@ -1400,9 +1405,10 @@
       const detail = row.entry
         ? `${row.grade || '-'} ${row.side || ''} entry ${fmtPrice(row.entry)} | SL ${fmtPrice(row.stopLoss)} | TP1 ${fmtPrice(row.tp1)} | R:R ${row.riskReward ? `1:${fmt(row.riskReward,2)}` : '-'}`
         : `${row.bias} | ${row.setup || row.reason || row.stage}`;
+      const age = row.scannedAt ? `scan ${formatAge(row.scannedAt)} ago` : 'scan age -';
       return `<div class="watchlist-row" data-symbol="${escapeHtml(row.symbol)}" title="Open ${escapeHtml(row.symbol)} chart">
         <div class="watch-symbol">${escapeHtml(row.symbol.replace('USDT',''))}</div>
-        <div class="watch-status">${escapeHtml(row.status)}<br>${escapeHtml(detail)}</div>
+        <div class="watch-status">${escapeHtml(row.status)}<br>${escapeHtml(detail)}<br><span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace">${escapeHtml(age)}</span></div>
         <div class="watch-score ${scoreClass}">${row.score}%</div>
       </div>`;
     }).join('');
@@ -1657,6 +1663,16 @@
     const d = new Date(value);
     if(isNaN(d.getTime())) return String(value || '-');
     return d.toLocaleString([], {month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+  }
+
+  function formatAge(value){
+    const ms = Date.now() - Number(value || 0);
+    if(!isFinite(ms) || ms < 0) return '-';
+    const sec = Math.floor(ms / 1000);
+    if(sec < 60) return `${sec}s`;
+    const min = Math.floor(sec / 60);
+    if(min < 60) return `${min}m`;
+    return `${Math.floor(min / 60)}h`;
   }
 
   function escapeHtml(value){
