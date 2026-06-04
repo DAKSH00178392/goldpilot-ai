@@ -1749,6 +1749,7 @@
   }
 
   const TradingEngines = {analyzeMarket, analyzeGoldPilot:buildDecision};
+  if(typeof globalThis !== 'undefined') globalThis.TradingEngines = TradingEngines;
   if(typeof window !== 'undefined') window.TradingEngines = TradingEngines;
   if(typeof module !== 'undefined' && module.exports) module.exports = TradingEngines;
 })();

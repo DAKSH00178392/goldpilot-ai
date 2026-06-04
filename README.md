@@ -93,6 +93,55 @@ Steps:
 
 Hosting note: risk settings, signal journal, demo trades, and mobile-alert state are stored in browser `localStorage`. They will stay available in the same browser/device, but they are not cloud-synced until a database/backend is added.
 
+24/7 cloud scanner
+
+Cloudflare Pages only runs when someone opens the dashboard. To scan while the browser is closed, deploy the Worker in `cloud_scanner_worker`.
+
+What it does:
+
+- Runs every 15 minutes with Cloudflare Cron Triggers
+- Scans the default 12 Binance symbols
+- Runs the same GoldPilot engine
+- Stores A+, A, and B+ committed signals in Cloudflare D1
+- Exposes `/api/latest-signals` for the dashboard or mobile alerts later
+
+Setup:
+
+```powershell
+cd cloud_scanner_worker
+npm create cloudflare@latest
+```
+
+If Wrangler is already available:
+
+```powershell
+cd cloud_scanner_worker
+wrangler d1 create goldpilot_ai
+```
+
+Copy the returned `database_id` into `cloud_scanner_worker/wrangler.toml`.
+
+Apply the schema:
+
+```powershell
+wrangler d1 execute goldpilot_ai --file=schema.sql --remote
+```
+
+Deploy:
+
+```powershell
+wrangler deploy
+```
+
+Test manually:
+
+```txt
+https://goldpilot-scanner.<your-subdomain>.workers.dev/api/scan
+https://goldpilot-scanner.<your-subdomain>.workers.dev/api/latest-signals
+```
+
+Security note: `/api/scan` is open in this MVP for easy testing. Before serious use, protect it with a secret token or disable manual scan calls.
+
 Risk settings
 
 The dashboard includes a Risk Engine settings form. It saves to `localStorage.goldpilotRiskSettings` and is used on every live engine refresh.

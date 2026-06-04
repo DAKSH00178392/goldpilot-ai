@@ -124,6 +124,8 @@ ok(dashboardHtml.includes('direction-grid'), 'dashboard shows long and short set
 ok(dashboardHtml.includes('id="journal-section"'), 'dashboard navbar can target journal section');
 const connectorPath = path.join(__dirname, 'goldpilot_live_dashboard.js');
 const connectorJs = fs.readFileSync(connectorPath, 'utf8');
+const workerPath = path.join(__dirname, '..', 'cloud_scanner_worker', 'src', 'index.js');
+const workerJs = fs.readFileSync(workerPath, 'utf8');
 ok(connectorJs.includes('goldpilotRiskSettings'), 'live connector persists risk settings');
 ok(connectorJs.includes('goldpilotSignalJournal'), 'live connector persists signal journal');
 ok(connectorJs.includes('goldpilotTradeJournal'), 'live connector separates trade journal for daily limits');
@@ -186,6 +188,11 @@ ok(connectorJs.includes('decision.sessionRules'), 'dashboard displays session ru
 ok(connectorJs.includes('Retest:'), 'dashboard displays retest quality checks');
 ok(connectorJs.includes('planHasValidReward'), 'dashboard marks TP levels as wait-only when R:R is invalid');
 ok(connectorJs.includes('NO ENTRY - TARGET TOO CLOSE'), 'dashboard hides actionable entry zone when reward is invalid');
+ok(workerJs.includes('scheduled(event, env, ctx)'), 'cloud scanner worker has scheduled cron handler');
+ok(workerJs.includes('/api/latest-signals'), 'cloud scanner worker exposes latest signals API');
+ok(workerJs.includes('committed_signals'), 'cloud scanner worker stores committed signals');
+ok(workerJs.includes('signalGrade.committable'), 'cloud scanner worker commits only graded signals');
+ok(fs.existsSync(path.join(__dirname, '..', 'cloud_scanner_worker', 'schema.sql')), 'cloud scanner worker includes D1 schema');
 
 // 6) Return success
 console.log('\nAll market structure smoke tests passed.');
