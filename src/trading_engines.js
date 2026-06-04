@@ -1189,6 +1189,94 @@
     };
   }
 
+  function buildFormationPlan(candles, analysis, bias, liquidityMap, locationContext, htfAlignment, sessionRules){
+    const last = candles[candles.length-1];
+    const atr = calculateAtr(candles, 14) || candleRange(last) || last.c * 0.002;
+    const nearest = (liquidityMap.nearest || [])[0] || null;
+    const lastSweep = (analysis.liquidity.stopHunts || []).slice(-1)[0];
+    let side = null;
+    let trigger = 'Wait for sweep/reclaim, BOS/CHOCH, or clean rejection before early entry';
+    let context = 'No immediate trade formation';
+    let watchedLevel = nearest ? nearest.price : null;
+
+    if(lastSweep && lastSweep.direction === 'short-sweep'){
+      side = 'LONG';
+      watchedLevel = lastSweep.structuralLow || lastSweep.peak || watchedLevel;
+      context = 'Sell-side liquidity has been swept; bullish reversal may form';
+      trigger = 'Hold above swept low, print bullish rejection, then break minor structure up';
+    } else if(lastSweep && lastSweep.direction === 'long-sweep'){
+      side = 'SHORT';
+      watchedLevel = lastSweep.structuralHigh || lastSweep.peak || watchedLevel;
+      context = 'Buy-side liquidity has been swept; bearish reversal may form';
+      trigger = 'Hold below swept high, print bearish rejection, then break minor structure down';
+    } else if(nearest && nearest.type === 'buy-side'){
+      side = 'SHORT';
+      context = `Price is approaching buy-side liquidity near ${round(nearest.price, priceDigits(nearest.price))}`;
+      trigger = 'Sweep that liquidity and close back below it, then bearish candle/CHOCH confirms';
+    } else if(nearest && nearest.type === 'sell-side'){
+      side = 'LONG';
+      context = `Price is approaching sell-side liquidity near ${round(nearest.price, priceDigits(nearest.price))}`;
+      trigger = 'Sweep that liquidity and close back above it, then bullish candle/CHOCH confirms';
+    } else if(bias.bias === 'Bullish' && locationContext.longAllowedLocation){
+      side = 'LONG';
+      context = 'Bullish context supports waiting for demand/FVG reaction';
+      trigger = 'Reject demand/FVG and close bullish with minor structure break';
+    } else if(bias.bias === 'Bearish' && locationContext.shortAllowedLocation){
+      side = 'SHORT';
+      context = 'Bearish context supports waiting for supply/FVG reaction';
+      trigger = 'Reject supply/FVG and close bearish with minor structure break';
+    }
+
+    if(!side){
+      return {
+        active:false,
+        phase:'NO_FORMATION',
+        side:null,
+        context,
+        trigger,
+        reasons:['No future trade formation has enough context yet']
+      };
+    }
+
+    const digits = priceDigits(last.c);
+    const center = watchedLevel || last.c;
+    const earlyZone = side === 'LONG'
+      ? [center - atr * 0.2, center + atr * 0.15]
+      : [center - atr * 0.15, center + atr * 0.2];
+    const invalidation = side === 'LONG'
+      ? Math.min(recentLow(candles, 12), earlyZone[0]) - atr * 0.2
+      : Math.max(recentHigh(candles, 12), earlyZone[1]) + atr * 0.2;
+    const chaseLevel = side === 'LONG'
+      ? center + atr * 0.9
+      : center - atr * 0.9;
+    const htfOk = side === 'LONG' ? htfAlignment.longOk : htfAlignment.shortOk;
+    const locationOk = side === 'LONG' ? locationContext.longAllowedLocation : locationContext.shortAllowedLocation;
+    const sessionOk = side === 'LONG' ? sessionRules.longOk : sessionRules.shortOk;
+    const active = htfOk && locationOk && sessionOk;
+    const phase = active ? 'EARLY_FORMING' : 'CONTEXT_ONLY';
+    const reasons = [];
+    if(!htfOk) reasons.push('HTF alignment must clear before early entry');
+    if(!locationOk) reasons.push('Premium/discount location is not favorable yet');
+    if(!sessionOk) reasons.push('Session rules block early entry');
+    if(active) reasons.push('Major context is aligned; wait for trigger candle');
+
+    return {
+      active,
+      phase,
+      side,
+      context,
+      trigger,
+      earlyEntryZone:[round(earlyZone[0], digits), round(earlyZone[1], digits)],
+      invalidation:round(invalidation, digits),
+      chaseLevel:round(chaseLevel, digits),
+      tooLateRule:side === 'LONG'
+        ? `Do not chase above ${round(chaseLevel, digits)} before confirmation`
+        : `Do not chase below ${round(chaseLevel, digits)} before confirmation`,
+      watchedLevel:round(center, digits),
+      reasons:[...new Set(reasons)]
+    };
+  }
+
   function evaluateDecisionState(analysis, setup, candleBehavior, tradability, risk, plan){
     const missing = [];
     const blockedReasons = [];
@@ -1643,6 +1731,7 @@
     const signalGrade = buildSignalGrade(setup, plan, risk, decisionState);
     const directionalStructure = hasDirectionalStructure(analysis, setup.direction);
     const nextStepForecast = buildNextStepForecast(analysis, candleBehavior, bias, regime, liquidityMap, directional.long, directional.short);
+    const formationPlan = buildFormationPlan(candles, analysis, bias, liquidityMap, locationContext, htfAlignment, sessionRules);
 
     let tradeStatus = 'WAIT';
     const reason = [];
@@ -1706,6 +1795,7 @@
       chartStructure:analysis.market,
       candleBehavior,
       nextStepForecast,
+      formationPlan,
       setup,
       longSetup:directional.long,
       shortSetup:directional.short,

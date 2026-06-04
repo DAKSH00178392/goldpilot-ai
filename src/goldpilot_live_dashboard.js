@@ -1253,18 +1253,27 @@
     if(hint){
       const forecast = decision.nextStepForecast;
       const targetNote = plan && plan.targetQuality ? ` Target quality: ${plan.targetQuality}. ${plan.targetWarning || ''}` : '';
-      hint.textContent = forecast
-        ? `${forecast.expectation}. ${forecast.nextCandleMust}`
-        : (decision.nextConditionNeeded || decision.reason || ['Wait for confirmed setup.']).join(' ');
+      const formation = decision.formationPlan;
+      hint.textContent = formation && formation.side
+        ? `${formation.phase}: ${formation.context}. Trigger: ${formation.trigger}. ${formation.tooLateRule || ''}`
+        : forecast
+          ? `${forecast.expectation}. ${forecast.nextCandleMust}`
+          : (decision.nextConditionNeeded || decision.reason || ['Wait for confirmed setup.']).join(' ');
       hint.textContent += targetNote;
     }
-    if(zone) zone.textContent = plan && plan.entryZone
-      ? (planHasValidReward ? `${fmtPrice(plan.entryZone[0])} - ${fmtPrice(plan.entryZone[1])}` : 'NO ENTRY - TARGET TOO CLOSE')
-      : '-';
+    if(zone){
+      if(plan && plan.entryZone){
+        zone.textContent = planHasValidReward ? `${fmtPrice(plan.entryZone[0])} - ${fmtPrice(plan.entryZone[1])}` : 'NO ENTRY - TARGET TOO CLOSE';
+      } else if(decision.formationPlan && decision.formationPlan.earlyEntryZone){
+        zone.textContent = `${fmtPrice(decision.formationPlan.earlyEntryZone[0])} - ${fmtPrice(decision.formationPlan.earlyEntryZone[1])}`;
+      } else {
+        zone.textContent = '-';
+      }
+    }
     if(values[0]) values[0].textContent = plan ? (planHasValidReward ? fmtPrice(plan.takeProfit.tp1) : `Wait (${fmtPrice(plan.takeProfit.tp1)})`) : '-';
-    if(values[1]) values[1].textContent = plan ? fmtPrice(plan.invalidation) : '-';
+    if(values[1]) values[1].textContent = plan ? fmtPrice(plan.invalidation) : decision.formationPlan && decision.formationPlan.invalidation ? fmtPrice(decision.formationPlan.invalidation) : '-';
     if(values[2]) values[2].textContent = plan ? (planHasValidReward ? fmtPrice(plan.takeProfit.tp2) : `Wait (${fmtPrice(plan.takeProfit.tp2)})`) : '-';
-    if(values[3]) values[3].textContent = plan ? fmtPrice(plan.stopLoss) : '-';
+    if(values[3]) values[3].textContent = plan ? fmtPrice(plan.stopLoss) : decision.formationPlan && decision.formationPlan.invalidation ? fmtPrice(decision.formationPlan.invalidation) : '-';
     if(rr) rr.textContent = plan ? `1:${fmt(plan.riskReward, 2)}` : '-';
     if(rrFill) rrFill.style.width = plan ? `${Math.min(100, plan.riskReward * 25)}%` : '0%';
   }

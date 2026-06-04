@@ -42,6 +42,7 @@ ok(decision.signalGrade && decision.signalGrade.grade, 'GoldPilot decision retur
 ok(decision.setupStage && Array.isArray(decision.missingConditions) && typeof decision.entryReadinessScore === 'number', 'GoldPilot decision returns setup stage/readiness fields');
 ok(decision.longSetup && decision.shortSetup && decision.preferredDirection, 'GoldPilot decision returns long/short setup candidates');
 ok(decision.nextStepForecast && decision.nextStepForecast.nextCandleMust, 'GoldPilot decision returns next-step candle forecast');
+ok(decision.formationPlan && decision.formationPlan.phase, 'GoldPilot decision returns future trade formation plan');
 for(const candidate of [decision.longSetup, decision.shortSetup]){
   if(candidate && candidate.tradePlan){
     const p = candidate.tradePlan;
@@ -64,6 +65,9 @@ ok(engineSource.includes('isClosed !== false'), 'engine ignores still-forming ca
 ok(engineSource.includes('hasDirectionalStructure'), 'engine requires setup-direction structure confirmation');
 ok(engineSource.includes('hasDirectionalCandle'), 'engine requires setup-direction candle confirmation');
 ok(engineSource.includes('buildNextStepForecast'), 'engine uses algorithmic next-step forecast logic');
+ok(engineSource.includes('buildFormationPlan'), 'engine builds future trade formation plans');
+ok(engineSource.includes('earlyEntryZone'), 'formation plan exposes early entry zone');
+ok(engineSource.includes('tooLateRule'), 'formation plan exposes no-chase late entry rule');
 ok(engineSource.includes('counterBias'), 'engine treats bias as a score factor instead of a hard trend-only block');
 ok(engineSource.includes('minLotLoss'), 'risk engine reports minimum-size risk when below broker minimum');
 ok(engineSource.includes('marketTargetBased'), 'engine uses market target based TP planning');
@@ -183,6 +187,8 @@ ok(connectorJs.includes('tp2 != null'), 'committed signal TP checks ignore missi
 ok(connectorJs.includes('renderDemoTrades'), 'dashboard renders remembered demo trades');
 ok(dashboardHtml.includes('demo-trades'), 'dashboard exposes demo trades panel');
 ok(connectorJs.includes('nextStepForecast'), 'dashboard displays next-step forecast from engine');
+ok(connectorJs.includes('formationPlan'), 'dashboard displays future trade formation plan');
+ok(connectorJs.includes('earlyEntryZone'), 'dashboard displays early entry zone when no confirmed plan exists');
 ok(connectorJs.includes('decision.locationContext'), 'dashboard displays premium/discount location checks');
 ok(connectorJs.includes('decision.volumeContext'), 'dashboard displays volume confirmation checks');
 ok(connectorJs.includes('decision.trendQuality'), 'dashboard displays trend quality checks');
