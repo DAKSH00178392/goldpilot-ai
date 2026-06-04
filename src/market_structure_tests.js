@@ -43,6 +43,7 @@ ok(decision.setupStage && Array.isArray(decision.missingConditions) && typeof de
 ok(decision.longSetup && decision.shortSetup && decision.preferredDirection, 'GoldPilot decision returns long/short setup candidates');
 ok(decision.nextStepForecast && decision.nextStepForecast.nextCandleMust, 'GoldPilot decision returns next-step candle forecast');
 ok(decision.formationPlan && decision.formationPlan.phase, 'GoldPilot decision returns future trade formation plan');
+ok(decision.earlyTrigger && decision.earlyTrigger.stage, 'GoldPilot decision returns early trigger validation state');
 for(const candidate of [decision.longSetup, decision.shortSetup]){
   if(candidate && candidate.tradePlan){
     const p = candidate.tradePlan;
@@ -181,6 +182,10 @@ ok(connectorJs.includes('upsertDemoTradeFromSignal'), 'committed signals open de
 ok(connectorJs.includes('isCommittableDecision'), 'dashboard commits A/A+/B+ grade decisions');
 ok(connectorJs.includes('commitWatchlistSignal'), 'watchlist can commit ready signals across all scanned symbols');
 ok(connectorJs.includes('updateDemoTrades'), 'demo trades update against live price for TP/SL/PnL');
+ok(connectorJs.includes('settleDemoBalance'), 'closed demo trades settle realized PnL into account balance');
+ok(connectorJs.includes("if(row.status === 'CLOSED')"), 'already-closed demo trades are settled after refresh');
+ok(connectorJs.includes('openQuantity'), 'demo trades track open quantity after TP1 partial close');
+ok(connectorJs.includes('realizedPnl'), 'demo trades separate realized and floating PnL');
 ok(connectorJs.includes('BREAKEVEN_STOP'), 'committed trade state machine supports breakeven after TP1');
 ok(connectorJs.includes('breakEvenArmed'), 'demo trade management arms breakeven after TP1');
 ok(connectorJs.includes('tp2 != null'), 'committed signal TP checks ignore missing targets');

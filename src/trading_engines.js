@@ -1198,33 +1198,40 @@
     let trigger = 'Wait for sweep/reclaim, BOS/CHOCH, or clean rejection before early entry';
     let context = 'No immediate trade formation';
     let watchedLevel = nearest ? nearest.price : null;
+    let formationSource = 'none';
 
     if(lastSweep && lastSweep.direction === 'short-sweep'){
       side = 'LONG';
       watchedLevel = lastSweep.structuralLow || lastSweep.peak || watchedLevel;
       context = 'Sell-side liquidity has been swept; bullish reversal may form';
       trigger = 'Hold above swept low, print bullish rejection, then break minor structure up';
+      formationSource = 'sweep';
     } else if(lastSweep && lastSweep.direction === 'long-sweep'){
       side = 'SHORT';
       watchedLevel = lastSweep.structuralHigh || lastSweep.peak || watchedLevel;
       context = 'Buy-side liquidity has been swept; bearish reversal may form';
       trigger = 'Hold below swept high, print bearish rejection, then break minor structure down';
+      formationSource = 'sweep';
     } else if(nearest && nearest.type === 'buy-side'){
       side = 'SHORT';
       context = `Price is approaching buy-side liquidity near ${round(nearest.price, priceDigits(nearest.price))}`;
       trigger = 'Sweep that liquidity and close back below it, then bearish candle/CHOCH confirms';
+      formationSource = 'liquidity-approach';
     } else if(nearest && nearest.type === 'sell-side'){
       side = 'LONG';
       context = `Price is approaching sell-side liquidity near ${round(nearest.price, priceDigits(nearest.price))}`;
       trigger = 'Sweep that liquidity and close back above it, then bullish candle/CHOCH confirms';
+      formationSource = 'liquidity-approach';
     } else if(bias.bias === 'Bullish' && locationContext.longAllowedLocation){
       side = 'LONG';
       context = 'Bullish context supports waiting for demand/FVG reaction';
       trigger = 'Reject demand/FVG and close bullish with minor structure break';
+      formationSource = 'bias-location';
     } else if(bias.bias === 'Bearish' && locationContext.shortAllowedLocation){
       side = 'SHORT';
       context = 'Bearish context supports waiting for supply/FVG reaction';
       trigger = 'Reject supply/FVG and close bearish with minor structure break';
+      formationSource = 'bias-location';
     }
 
     if(!side){
@@ -1264,6 +1271,7 @@
       active,
       phase,
       side,
+      source:formationSource,
       context,
       trigger,
       earlyEntryZone:[round(earlyZone[0], digits), round(earlyZone[1], digits)],
@@ -1624,6 +1632,152 @@
     };
   }
 
+  function buildEntryPlanFromPrice(candles, analysis, liquidityMap, side, entry, stop, label){
+    if(!side || !isFinite(entry) || !isFinite(stop)) return null;
+    const riskDistance = side === 'LONG' ? entry - stop : stop - entry;
+    if(!(riskDistance > 0)) return null;
+    const last = candles[candles.length-1];
+    const atr = calculateAtr(candles, 14) || candleRange(last) || entry * 0.002;
+    const digits = priceDigits(entry);
+    const allTargets = buildTargetCandidates(candles, analysis, side, entry, liquidityMap, atr);
+    const actionableTargets = allTargets.filter(target => target.rewardDistance / riskDistance >= CONFIG.minRiskReward);
+    const minorTargets = allTargets.filter(target => target.rewardDistance / riskDistance < CONFIG.minRiskReward);
+    const firstTarget = actionableTargets[0] || allTargets[0] || null;
+    const secondTarget = actionableTargets[1] || allTargets.find(t => firstTarget && t.price !== firstTarget.price && t.rewardDistance > firstTarget.rewardDistance) || null;
+    const rr = firstTarget ? rewardDistance(side, entry, firstTarget.price) / riskDistance : 0;
+    return {
+      side,
+      entryZone:[round(entry - atr * 0.06, digits), round(entry + atr * 0.06, digits)],
+      entry:round(entry, digits),
+      invalidation:round(stop, digits),
+      invalidationReason:'Early trigger invalidation from formation plan',
+      stopLoss:round(stop, digits),
+      takeProfit:{
+        tp1:round(firstTarget ? firstTarget.price : null, digits),
+        tp2:round(secondTarget ? secondTarget.price : firstTarget ? firstTarget.price : null, digits)
+      },
+      riskReward:round(rr, 2),
+      invalidationSource:'Early trigger formation invalidation',
+      invalidationOptimized:false,
+      setupLabel:label || 'Early trigger',
+      targetCandidates:allTargets.slice(0, 6).map(target => ({
+        source:target.name || target.type || 'Market target',
+        price:round(target.price,digits),
+        rewardDistance:round(target.rewardDistance,digits),
+        requiredReward:round(riskDistance * CONFIG.minRiskReward,digits),
+        actionable:target.rewardDistance >= riskDistance * CONFIG.minRiskReward
+      })),
+      minorTargets:minorTargets.slice(0, 4).map(target => ({
+        source:target.name || target.type || 'Minor target',
+        price:round(target.price,digits),
+        riskReward:round(riskDistance ? target.rewardDistance / riskDistance : 0, 2)
+      })),
+      targetQuality:!firstTarget ? 'No confirmed target'
+        : rr < CONFIG.minRiskReward ? 'Targets too close for valid R:R'
+          : secondTarget ? 'Two valid market targets' : 'Single valid market target',
+      targetSource:firstTarget ? firstTarget.name || firstTarget.type || 'Market target' : 'No market target',
+      targetWarning:firstTarget
+        ? (rr >= CONFIG.minRiskReward ? `Early trigger has actionable ${firstTarget.name || firstTarget.type} with 1:${round(rr,2)} R:R` : `Early trigger target is too close: best reward only 1:${round(rr,2)}. Keep as watch-only.`)
+        : 'No valid directional liquidity/structure target found',
+      marketTargetBased:true,
+      earlyTrigger:true
+    };
+  }
+
+  function evaluateEarlyTrigger(candles, analysis, candleBehavior, liquidityMap, formationPlan, directional, bias, context){
+    if(!formationPlan || !formationPlan.active || formationPlan.phase !== 'EARLY_FORMING' || !formationPlan.side || !formationPlan.earlyEntryZone){
+      return {
+        active:false,
+        ready:false,
+        stage:'NO_EARLY_TRIGGER',
+        reasons:['No aligned early formation is active']
+      };
+    }
+    const side = formationPlan.side;
+    const last = candles[candles.length-1];
+    const prev = candles[candles.length-2] || last;
+    const atr = calculateAtr(candles, 14) || candleRange(last) || last.c * 0.002;
+    const avgBody = sma(candles.slice(-14).map(candleBody), 14) || candleBody(last) || atr * 0.35;
+    const zone = formationPlan.earlyEntryZone.map(Number).sort((a,b) => a-b);
+    const watched = Number(formationPlan.watchedLevel || (zone[0] + zone[1]) / 2);
+    const invalidation = Number(formationPlan.invalidation);
+    const sideCandidate = side === 'LONG' ? directional.long : directional.short;
+    const oppositeCandidate = side === 'LONG' ? directional.short : directional.long;
+    const body = candleBody(last);
+    const range = candleRange(last) || atr;
+    const upperWick = last.h - Math.max(last.o, last.c);
+    const lowerWick = Math.min(last.o, last.c) - last.l;
+    const exactInteraction = side === 'LONG'
+      ? last.l <= watched || prev.l <= watched
+      : last.h >= watched || prev.h >= watched;
+    const touchedWatched = side === 'LONG'
+      ? exactInteraction || last.l <= watched + atr * 0.12 || prev.l <= watched + atr * 0.12
+      : exactInteraction || last.h >= watched - atr * 0.12 || prev.h >= watched - atr * 0.12;
+    const closedAway = side === 'LONG'
+      ? last.c > watched && last.c > last.o
+      : last.c < watched && last.c < last.o;
+    const rejection = side === 'LONG'
+      ? lowerWick >= body * 0.65 || candleBehavior.rejectionScore >= 58
+      : upperWick >= body * 0.65 || candleBehavior.rejectionScore >= 58;
+    const decisiveBody = body >= avgBody * 0.85 || body / range >= 0.45 || candleBehavior.strengthScore >= 58;
+    const notChased = side === 'LONG'
+      ? last.c <= Math.max(zone[1], watched) + atr * 0.55
+      : last.c >= Math.min(zone[0], watched) - atr * 0.55;
+    const validStop = side === 'LONG' ? invalidation < last.c : invalidation > last.c;
+    const counterBias = !!(sideCandidate && sideCandidate.counterBias);
+    const oppositeStrong = !!(oppositeCandidate && oppositeCandidate.entryReadinessScore >= 80 && !oppositeCandidate.counterBias);
+    const higherTfOpposes = !!(bias && ((side === 'LONG' && bias.bias === 'Bearish') || (side === 'SHORT' && bias.bias === 'Bullish')));
+    const higherTfSupports = !!(bias && ((side === 'LONG' && bias.bias === 'Bullish') || (side === 'SHORT' && bias.bias === 'Bearish')));
+    const needsActualTouch = formationPlan.source === 'liquidity-approach';
+    const reasons = [];
+    let score = 45;
+
+    if(touchedWatched){ score += 12; reasons.push('price interacted with the watched liquidity/zone'); }
+    else reasons.push('watched liquidity/zone has not been interacted with yet');
+    if(closedAway){ score += 18; reasons.push(`${side} trigger candle closed away from the watched level`); }
+    else reasons.push(`wait for candle close in ${side} direction away from watched level`);
+    if(rejection){ score += 10; reasons.push('wick/rejection behavior supports the early trigger'); }
+    else reasons.push('rejection candle is not strong enough yet');
+    if(decisiveBody){ score += 10; reasons.push('trigger candle body is strong enough'); }
+    else reasons.push('trigger candle body is still weak');
+    if(notChased){ score += 8; reasons.push('entry is not too far from the trigger zone'); }
+    else reasons.push('move is already extended from the trigger zone');
+    if(validStop){ score += 7; }
+    else reasons.push('formation invalidation is on the wrong side of current price');
+    if(counterBias){ score -= 18; reasons.push('early trigger is counter-bias, so it stays watch-only'); }
+    if(oppositeStrong){ score -= 12; reasons.push('opposite side still has strong readiness'); }
+    if(needsActualTouch && !exactInteraction){ score -= 18; reasons.push('liquidity approach needs an actual touch/sweep before early entry'); }
+    if(needsActualTouch && !higherTfSupports){ score -= 24; reasons.push('liquidity-approach early trigger needs higher-timeframe directional support'); }
+    if(needsActualTouch && higherTfOpposes){ score -= 12; reasons.push('liquidity-approach early trigger is fighting higher-timeframe bias'); }
+    if(context && context.newsBlock){ score = 0; reasons.push('news block prevents early trigger'); }
+
+    score = Math.round(clamp(score, 0, 100));
+    const plan = buildEntryPlanFromPrice(candles, analysis, liquidityMap, side, last.c, invalidation, `${side} early liquidity trigger`);
+    const targetOk = !!(plan && plan.riskReward >= CONFIG.minRiskReward);
+    const ready = score >= 78 && touchedWatched && (!needsActualTouch || exactInteraction) && closedAway && (rejection || decisiveBody) && notChased && validStop && !counterBias && !oppositeStrong && (!needsActualTouch || higherTfSupports) && targetOk;
+    return {
+      active:true,
+      ready,
+      stage:ready ? 'EARLY_VALID' : 'EARLY_WAIT',
+      side,
+      score,
+      entryMode:'trigger-close',
+      watchedLevel:formationPlan.watchedLevel,
+      requiredConditions:[
+        'touch/sweep watched liquidity or zone',
+        `close ${side === 'LONG' ? 'above' : 'below'} watched level`,
+        'show rejection or decisive body',
+        'keep current entry close to trigger zone',
+        'use valid formation invalidation',
+        'market target must give at least 1:2 R:R'
+      ],
+      reasons:[...new Set(reasons)],
+      tradePlan:plan,
+      riskReward:plan ? plan.riskReward : 0,
+      targetOk
+    };
+  }
+
   function calculateRiskPermission(plan, account){
     if(!plan) return {allowed:false, reason:'No actionable trade plan'};
     const balance = Number(account.balance || 0);
@@ -1732,6 +1886,26 @@
     const directionalStructure = hasDirectionalStructure(analysis, setup.direction);
     const nextStepForecast = buildNextStepForecast(analysis, candleBehavior, bias, regime, liquidityMap, directional.long, directional.short);
     const formationPlan = buildFormationPlan(candles, analysis, bias, liquidityMap, locationContext, htfAlignment, sessionRules);
+    const earlyTrigger = evaluateEarlyTrigger(candles, analysis, candleBehavior, liquidityMap, formationPlan, directional, bias, context);
+    const earlyRisk = earlyTrigger.tradePlan ? calculateRiskPermission(earlyTrigger.tradePlan, context.account) : null;
+    const earlyCommittable = !!(earlyTrigger.ready && earlyRisk && earlyRisk.allowed);
+    let outputPlan = plan;
+    let outputRisk = risk;
+    let outputSignalGrade = signalGrade;
+    if(earlyCommittable && !signalGrade.committable){
+      outputPlan = earlyTrigger.tradePlan;
+      outputRisk = earlyRisk;
+      outputSignalGrade = {
+        grade:earlyTrigger.score >= 88 ? 'A' : 'B+',
+        committable:true,
+        label:'Early validated trigger',
+        reasons:[
+          `Early trigger score ${earlyTrigger.score}`,
+          'Trigger candle confirmed before full BOS/retest sequence',
+          earlyTrigger.tradePlan.targetWarning
+        ].filter(Boolean)
+      };
+    }
 
     let tradeStatus = 'WAIT';
     const reason = [];
@@ -1740,6 +1914,11 @@
       tradeStatus = 'BLOCKED';
       reason.push(...tradability.reasons);
       nextConditionNeeded.push('Wait until news/spread/volatility conditions normalize');
+    } else if(earlyCommittable && !signalGrade.committable){
+      tradeStatus = 'EARLY VALID';
+      reason.push(`${earlyTrigger.side} early trigger confirmed from liquidity/zone reaction`);
+      reason.push(...earlyTrigger.reasons.slice(0, 4));
+      nextConditionNeeded.push('Demo commit only: manage from trigger-close entry and fixed invalidation');
     } else if(!setup.direction){
       if(setup.setup) tradeStatus = 'WATCH ONLY';
       reason.push('No valid setup is confirmed');
@@ -1796,23 +1975,26 @@
       candleBehavior,
       nextStepForecast,
       formationPlan,
+      earlyTrigger,
       setup,
       longSetup:directional.long,
       shortSetup:directional.short,
       preferredDirection,
       setupStage:decisionState.setupStage,
-      signalGrade,
+      signalGrade:outputSignalGrade,
       missingConditions:decisionState.missingConditions,
       entryReadinessScore:decisionState.entryReadinessScore,
       blockedReasons:decisionState.blockedReasons,
       allowedActions:decisionState.allowedActions,
       entryTrigger:{
-        ready:tradeStatus.indexOf('ALLOWED') > -1 || tradeStatus === 'ENTRY READY' || signalGrade.committable,
-        type:setup.direction ? `${signalGrade.grade} grade | ${directionalStructure ? `${setup.direction} BOS/CHOCH close confirmation` : 'Sweep/retest watch'}` : null
+        ready:tradeStatus.indexOf('ALLOWED') > -1 || tradeStatus === 'ENTRY READY' || outputSignalGrade.committable,
+        type:earlyCommittable && !signalGrade.committable
+          ? `${outputSignalGrade.grade} grade | ${earlyTrigger.side} early trigger-close entry`
+          : setup.direction ? `${outputSignalGrade.grade} grade | ${directionalStructure ? `${setup.direction} BOS/CHOCH close confirmation` : 'Sweep/retest watch'}` : null
       },
-      tradePlan:plan,
-      risk,
-      management: plan ? [
+      tradePlan:outputPlan,
+      risk:outputRisk,
+      management: outputPlan ? [
         'Do not move SL emotionally',
         'Take partial profit at TP1 if reached',
         'Move SL to breakeven only after TP1 or a valid structure shift',
