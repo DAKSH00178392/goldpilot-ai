@@ -533,28 +533,33 @@
     const last = candles[candles.length-1];
     const prev = candles[candles.length-2];
     if(prev){
-      levels.push({name:'Previous candle high', type:'buy-side', price:prev.h});
-      levels.push({name:'Previous candle low', type:'sell-side', price:prev.l});
+      levels.push({name:'Previous candle high', type:'buy-side', price:prev.h, minor:true, actionable:false});
+      levels.push({name:'Previous candle low', type:'sell-side', price:prev.l, minor:true, actionable:false});
     }
     for(const l of analysis.liquidity.notableLevels || []){
-      levels.push({name:l.role || l.type, type:l.type === 'high' ? 'buy-side' : 'sell-side', price:l.price, touches:l.count});
+      levels.push({name:l.role || l.type, type:l.type === 'high' ? 'buy-side' : 'sell-side', price:l.price, touches:l.count, actionable:true});
     }
     if(last && last.c){
       const step = roundNumberStep(last.c);
       const lower = Math.floor(last.c / step) * step;
-      levels.push({name:'Round number below', type:'sell-side', price:lower});
-      levels.push({name:'Round number above', type:'buy-side', price:lower + step});
+      levels.push({name:'Round number below', type:'sell-side', price:lower, actionable:true});
+      levels.push({name:'Round number above', type:'buy-side', price:lower + step, actionable:true});
     }
     const digits = priceDigits(last && last.c);
     levels.sort((a,b)=>Math.abs(a.price - last.c) - Math.abs(b.price - last.c));
+    const mapped = levels.slice(0,8).map(l=>Object.assign({}, l, {
+      price:round(l.price, digits),
+      distance:round(Math.abs(l.price - last.c), digits),
+      distancePct:last && last.c ? round(Math.abs(l.price - last.c) / last.c * 100, 3) : null
+    }));
+    const actionableNearest = mapped.filter(l => l.actionable !== false && !l.minor);
+    const warningLevel = actionableNearest[0];
     return {
-      nearest:levels.slice(0,5).map(l=>Object.assign({}, l, {
-        price:round(l.price, digits),
-        distance:round(Math.abs(l.price - last.c), digits)
-      })),
+      nearest:mapped.slice(0,5),
+      actionableNearest:actionableNearest.slice(0,5),
       sweeps:analysis.liquidity.stopHunts.slice(-5),
-      warning:levels[0] && Math.abs(levels[0].price - last.c) / last.c < 0.0015
-        ? `Price is close to ${levels[0].type} liquidity near ${round(levels[0].price,digits)}`
+      warning:warningLevel && Math.abs(warningLevel.price - last.c) / last.c < 0.0015
+        ? `Price is close to ${warningLevel.type} liquidity near ${round(warningLevel.price,digits)}`
         : null
     };
   }
@@ -936,11 +941,13 @@
     return (side === 'LONG' && bias.bias === 'Bearish') || (side === 'SHORT' && bias.bias === 'Bullish');
   }
 
-  function buildDirectionalSetup(side, candles, analysis, candleBehavior, bias, regime, locationContext, volumeContext, trendQuality, cryptoContext, htfAlignment, sessionRules){
+  function buildDirectionalSetup(side, candles, analysis, candleBehavior, bias, regime, liquidityMap, locationContext, volumeContext, trendQuality, cryptoContext, htfAlignment, sessionRules){
     const reasons = [];
     const needs = [];
     let setup = null;
     let quality = 'Low';
+    const last = candles[candles.length-1];
+    const atr = calculateAtr(candles, 14) || candleRange(last) || last.c * 0.002;
     const lastSweep = (analysis.liquidity.stopHunts || []).slice(-1)[0];
     const counterBias = isCounterBias(side, bias);
     const directionWord = side === 'LONG' ? 'bullish' : 'bearish';
@@ -953,6 +960,15 @@
       : false;
     const retestContext = buildRetestContext(candles, analysis, side);
     const htfOk = side === 'LONG' ? !htfAlignment || htfAlignment.longOk : !htfAlignment || htfAlignment.shortOk;
+    const pathLiquidity = (liquidityMap && liquidityMap.actionableNearest || [])[0] || null;
+    const pathLiquidityDistance = pathLiquidity ? Math.abs(Number(pathLiquidity.price) - last.c) : Infinity;
+    const pathLiquidityTooClose = !!(pathLiquidity && pathLiquidityDistance <= atr * 0.45);
+    const liquidityPathBlocked = !!(
+      pathLiquidityTooClose && (
+        (side === 'SHORT' && pathLiquidity.type === 'sell-side') ||
+        (side === 'LONG' && pathLiquidity.type === 'buy-side')
+      )
+    );
     if(side === 'LONG'){
       if(counterBias) needs.push('Counter-bias long needs stronger sweep/reclaim proof');
       if(locationContext && !locationOk) needs.push('Wait for discount/FVG/order-block retest or sell-side sweep before long');
@@ -1032,8 +1048,13 @@
     if(setup && sessionRules && !sideSessionOk){
       needs.push(`${sessionRules.session} session rules do not allow this setup yet`);
     }
+    if(setup && liquidityPathBlocked){
+      needs.push(`${side} is running into nearby ${pathLiquidity.type} liquidity; wait for sweep/reaction or deeper retest`);
+      reasons.push(`Nearby ${pathLiquidity.type} liquidity is too close for clean ${side} path`);
+    }
 
-    if(setup && candleBehavior.strengthScore > 70) quality = 'High';
+    if(setup && liquidityPathBlocked) quality = 'Watch';
+    else if(setup && candleBehavior.strengthScore > 70) quality = 'High';
     else if(setup && (candleBehavior.strengthScore > 45 || candleBehavior.rejectionScore > 60)) quality = 'Medium';
     else if(setup && /watch/i.test(setup)) quality = 'Watch';
 
@@ -1047,6 +1068,12 @@
       volumeOk:!volumeContext || volumeContext.confirmsBreakout || !/BOS|continuation/i.test(setup || ''),
       trendOk:!trendQuality || trendQuality.score >= 45 || !/BOS|continuation|pullback/i.test(setup || ''),
       cryptoOk:!cryptoContext || !cryptoContext.chaseRisk || /sweep/i.test(setup || ''),
+      liquidityPathOk:!liquidityPathBlocked,
+      pathLiquidity:pathLiquidity ? {
+        type:pathLiquidity.type,
+        price:pathLiquidity.price,
+        distance:round(pathLiquidityDistance, priceDigits(last.c))
+      } : null,
       retestOk:!continuationSetup || !retestContext.required || retestContext.ok,
       retestContext,
       htfOk,
@@ -1060,7 +1087,7 @@
     const sides = ['LONG','SHORT'];
     const out = {};
     for(const side of sides){
-      const setup = buildDirectionalSetup(side, candles, analysis, candleBehavior, bias, regime, locationContext, volumeContext, trendQuality, cryptoContext, htfAlignment, sessionRules);
+      const setup = buildDirectionalSetup(side, candles, analysis, candleBehavior, bias, regime, liquidityMap, locationContext, volumeContext, trendQuality, cryptoContext, htfAlignment, sessionRules);
       const plan = buildTradePlan(candles, analysis, setup, liquidityMap);
       const risk = calculateRiskPermission(plan, account || {});
       const state = evaluateDecisionState(analysis, setup, candleBehavior, tradability, risk, plan);
@@ -1074,6 +1101,8 @@
         volumeOk:setup.volumeOk,
         trendOk:setup.trendOk,
         cryptoOk:setup.cryptoOk,
+        liquidityPathOk:setup.liquidityPathOk,
+        pathLiquidity:setup.pathLiquidity,
         retestOk:setup.retestOk,
         retestContext:setup.retestContext,
         htfOk:setup.htfOk,
@@ -1192,7 +1221,7 @@
   function buildFormationPlan(candles, analysis, bias, liquidityMap, locationContext, htfAlignment, sessionRules){
     const last = candles[candles.length-1];
     const atr = calculateAtr(candles, 14) || candleRange(last) || last.c * 0.002;
-    const nearest = (liquidityMap.nearest || [])[0] || null;
+    const nearest = (liquidityMap.actionableNearest || [])[0] || null;
     const lastSweep = (analysis.liquidity.stopHunts || []).slice(-1)[0];
     let side = null;
     let trigger = 'Wait for sweep/reclaim, BOS/CHOCH, or clean rejection before early entry';
@@ -1335,6 +1364,10 @@
         score -= 15;
         missing.push('Crypto impulse/chase risk: wait for retest confirmation');
       }
+      if(setup.liquidityPathOk === false){
+        score -= 20;
+        missing.push('Nearby liquidity is in the trade path; wait for sweep/reaction or a deeper retest');
+      }
       if(setup.retestOk === false){
         score -= 18;
         missing.push('Retest depth/rejection is not confirmed');
@@ -1393,6 +1426,7 @@
       && setup.volumeOk !== false
       && setup.trendOk !== false
       && setup.cryptoOk !== false
+      && setup.liquidityPathOk !== false
       && setup.retestOk !== false
       && setup.htfOk !== false
       && setup.sessionOk !== false;
@@ -1432,6 +1466,7 @@
     if(setup && setup.locationOk === false) hardReasons.push('Bad premium/discount location');
     if(setup && setup.htfOk === false) hardReasons.push('HTF zone conflict');
     if(setup && setup.cryptoOk === false) hardReasons.push('Crypto chase risk');
+    if(setup && setup.liquidityPathOk === false) hardReasons.push('Nearby liquidity blocks trade path');
     if(setup && setup.sessionOk === false) hardReasons.push('Session rule block');
     if(decisionState && !decisionState.directionalStructure) hardReasons.push('Missing BOS/CHOCH');
     if(decisionState && !decisionState.directionalCandle) hardReasons.push('Missing confirming candle');
@@ -1513,7 +1548,8 @@
     const roundBelow = Math.floor(entry / step) * step;
     const roundAbove = roundBelow + step;
 
-    for(const level of liquidityMap.nearest || []){
+    for(const level of liquidityMap.actionableNearest || []){
+      if(level.minor || level.actionable === false) continue;
       addTargetCandidate(targets, side, entry, {
         name:level.name || level.type || 'Nearby liquidity',
         type:level.type || 'liquidity',
@@ -1856,6 +1892,8 @@
         volumeOk:directional.long.volumeOk,
         trendOk:directional.long.trendOk,
         cryptoOk:directional.long.cryptoOk,
+        liquidityPathOk:directional.long.liquidityPathOk,
+        pathLiquidity:directional.long.pathLiquidity,
         retestOk:directional.long.retestOk,
         retestContext:directional.long.retestContext,
         htfOk:directional.long.htfOk,
@@ -1874,6 +1912,8 @@
         volumeOk:directional.short.volumeOk,
         trendOk:directional.short.trendOk,
         cryptoOk:directional.short.cryptoOk,
+        liquidityPathOk:directional.short.liquidityPathOk,
+        pathLiquidity:directional.short.pathLiquidity,
         retestOk:directional.short.retestOk,
         retestContext:directional.short.retestContext,
         htfOk:directional.short.htfOk,

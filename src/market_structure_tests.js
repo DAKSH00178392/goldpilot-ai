@@ -62,6 +62,11 @@ for(const candidate of [decision.longSetup, decision.shortSetup]){
 const engineSource = fs.readFileSync(path.join(__dirname,'trading_engines.js'),'utf8');
 ok(engineSource.includes('priceDigits'), 'engine uses dynamic price precision');
 ok(engineSource.includes('roundNumberStep'), 'engine scales round-number liquidity by asset price');
+ok(engineSource.includes('actionableNearest'), 'engine separates actionable liquidity from minor nearby levels');
+ok(engineSource.includes("actionable:false"), 'engine marks previous-candle liquidity as non-actionable');
+ok(engineSource.includes('liquidityPathOk'), 'engine blocks trades running directly into nearby liquidity');
+ok(engineSource.includes('Nearby liquidity is in the trade path'), 'engine explains liquidity path risk');
+ok(engineSource.includes('Nearby liquidity blocks trade path'), 'signal grade treats liquidity path risk as a hard block');
 ok(engineSource.includes('isClosed !== false'), 'engine ignores still-forming candles for decisions');
 ok(engineSource.includes('hasDirectionalStructure'), 'engine requires setup-direction structure confirmation');
 ok(engineSource.includes('hasDirectionalCandle'), 'engine requires setup-direction candle confirmation');
