@@ -406,7 +406,7 @@
 
   function planSignature(plan){
     if(!plan) return '';
-    return [plan.side, plan.entry, plan.stopLoss, plan.takeProfit && plan.takeProfit.tp1, plan.takeProfit && plan.takeProfit.tp2].join('|');
+    return [plan.side, plan.entry, plan.stopLoss, plan.takeProfit && plan.takeProfit.tp1, plan.takeProfit && plan.takeProfit.tp2, plan.takeProfit && plan.takeProfit.tp3].join('|');
   }
 
   function currentMarketPrice(){
@@ -489,6 +489,11 @@
       hardStopLoss:plan.stopLoss,
       tp1:plan.takeProfit ? plan.takeProfit.tp1 : null,
       tp2:plan.takeProfit ? plan.takeProfit.tp2 : null,
+      tp3:plan.takeProfit ? plan.takeProfit.tp3 : null,
+      tpModel:plan.takeProfit ? plan.takeProfit.model : null,
+      tpPartials:plan.takeProfit && plan.takeProfit.partials ? plan.takeProfit.partials : {tp1:40,tp2:35,tp3:25},
+      atrTrail:plan.takeProfit ? plan.takeProfit.trail : null,
+      maxHoldCandles:plan.takeProfit ? plan.takeProfit.maxHoldCandles : 12,
       quantity,
       initialQuantity:quantity,
       openQuantity:quantity,
@@ -522,15 +527,26 @@
       row.maxAdverse = Math.min(Number(row.maxAdverse || 0), row.pnl);
       const initialQty = Number(row.initialQuantity || row.quantity || 0);
       if(row.openQuantity == null) row.openQuantity = Number(row.quantity || 0);
+      const partials = row.tpPartials || {tp1:40,tp2:35,tp3:25};
       const takePartial = exitPrice => {
         if(row.tp1Settled) return;
-        const partialQty = roundLocal(initialQty * 0.5, 8);
+        const partialQty = roundLocal(initialQty * (Number(partials.tp1 || 40) / 100), 8);
         row.realizedPnl = roundLocal(Number(row.realizedPnl || 0) + pnlForQuantity(row, exitPrice, partialQty), 4);
         row.openQuantity = Math.max(0, roundLocal(Number(row.openQuantity || initialQty) - partialQty, 8));
         row.tp1Settled = true;
         row.partialClosedQty = partialQty;
         row.partialClosedAt = new Date().toISOString();
         row.partialExitPrice = exitPrice;
+      };
+      const takeTp2Partial = exitPrice => {
+        if(row.tp2Settled) return;
+        const partialQty = Math.min(Number(row.openQuantity || 0), roundLocal(initialQty * (Number(partials.tp2 || 35) / 100), 8));
+        row.realizedPnl = roundLocal(Number(row.realizedPnl || 0) + pnlForQuantity(row, exitPrice, partialQty), 4);
+        row.openQuantity = Math.max(0, roundLocal(Number(row.openQuantity || 0) - partialQty, 8));
+        row.tp2Settled = true;
+        row.tp2ClosedQty = partialQty;
+        row.tp2ClosedAt = new Date().toISOString();
+        row.tp2ExitPrice = exitPrice;
       };
       const closeRemaining = (result, exitPrice) => {
         const openQty = Number(row.openQuantity != null ? row.openQuantity : row.quantity || 0);
@@ -545,14 +561,16 @@
         closeCommittedSignalForDemo(row);
       };
       if(row.side === 'LONG'){
-        if(row.status === 'TP1_HIT' && price <= row.entry){ closeRemaining('BREAKEVEN', row.entry); }
+        if((row.status === 'TP1_HIT' || row.status === 'TP2_HIT') && price <= row.entry){ closeRemaining('BREAKEVEN', row.entry); }
         else if(price <= row.stopLoss){ closeRemaining('SL', row.stopLoss); }
-        else if(row.tp2 && price >= row.tp2){ closeRemaining('TP2', row.tp2); }
+        else if(row.tp3 && price >= row.tp3){ closeRemaining('TP3', row.tp3); }
+        else if(row.tp2 && price >= row.tp2){ takeTp2Partial(row.tp2); row.status = 'TP2_HIT'; row.pnl = roundLocal(demoTradePnl(row, price), 4); }
         else if(row.tp1 && price >= row.tp1){ takePartial(row.tp1); row.status = 'TP1_HIT'; row.breakEvenArmed = true; row.stopLoss = row.entry; row.pnl = roundLocal(demoTradePnl(row, price), 4); }
       } else {
-        if(row.status === 'TP1_HIT' && price >= row.entry){ closeRemaining('BREAKEVEN', row.entry); }
+        if((row.status === 'TP1_HIT' || row.status === 'TP2_HIT') && price >= row.entry){ closeRemaining('BREAKEVEN', row.entry); }
         else if(price >= row.stopLoss){ closeRemaining('SL', row.stopLoss); }
-        else if(row.tp2 && price <= row.tp2){ closeRemaining('TP2', row.tp2); }
+        else if(row.tp3 && price <= row.tp3){ closeRemaining('TP3', row.tp3); }
+        else if(row.tp2 && price <= row.tp2){ takeTp2Partial(row.tp2); row.status = 'TP2_HIT'; row.pnl = roundLocal(demoTradePnl(row, price), 4); }
         else if(row.tp1 && price <= row.tp1){ takePartial(row.tp1); row.status = 'TP1_HIT'; row.breakEvenArmed = true; row.stopLoss = row.entry; row.pnl = roundLocal(demoTradePnl(row, price), 4); }
       }
       if(row.status !== previousStatus){
@@ -778,6 +796,7 @@
       stopLoss: plan.stopLoss || null,
       tp1: plan.takeProfit ? plan.takeProfit.tp1 : null,
       tp2: plan.takeProfit ? plan.takeProfit.tp2 : null,
+      tp3: plan.takeProfit ? plan.takeProfit.tp3 : null,
       riskReward: plan.riskReward || null,
       lotSize: decision.risk ? decision.risk.lotSize : null,
       riskPct: decision.risk ? decision.risk.riskPct : settings.riskPct,
@@ -1162,7 +1181,8 @@
       const lines = setupEl.querySelectorAll('div');
       if(lines[1]){
         const grade = decision.signalGrade ? ` | grade ${decision.signalGrade.grade}` : '';
-        lines[1].textContent = `${decision.setupStage || 'WAIT'} | readiness ${score}%${grade}`;
+        const master = decision.masterScore ? ` | master ${decision.masterScore.score} ${decision.masterScore.tier}` : '';
+        lines[1].textContent = `${decision.setupStage || 'WAIT'} | readiness ${score}%${grade}${master}`;
       }
     }
   }
@@ -1180,7 +1200,7 @@
     const setup = displaySetup(decision);
     const score = displayReadinessScore(decision);
     const setupText = setup && setup.setup
-      ? `${setup.setup} (${setup.quality || 'Watch'}) | readiness ${score}%`
+      ? `${setup.setup} (${setup.quality || 'Watch'}) | readiness ${score}%${decision.masterScore ? ` | master ${decision.masterScore.score} ${decision.masterScore.tier}` : ''}`
       : 'No valid setup confirmed';
     const setupEl = qsa('.status-row > div')[1];
     if(setupEl){
@@ -1730,15 +1750,16 @@
         ? ` | Balance $${fmt(row.balanceBefore, 2)} -> $${fmt(row.balanceAfter, 2)}`
         : '';
       const reserved = row.reservedRisk != null ? ` | Risk $${fmt(row.reservedRisk, 2)}` : '';
-      const partial = row.tp1Settled ? ` | TP1 50% banked` : '';
+      const partial = row.tp1Settled ? ` | TP1 ${row.tpPartials && row.tpPartials.tp1 ? row.tpPartials.tp1 : 40}% banked` : '';
+      const tp2Partial = row.tp2Settled ? ` | TP2 ${row.tpPartials && row.tpPartials.tp2 ? row.tpPartials.tp2 : 35}% banked` : '';
       return `<div class="demo-trade ${isClosed ? 'closed' : 'open'}">
         <div class="demo-head">
           <span class="demo-symbol">${escapeHtml(row.symbol)} ${escapeHtml(row.side || '')}</span>
           <span class="demo-status">${escapeHtml(result)}</span>
         </div>
         <div class="demo-line">${escapeHtml(row.timeframe || '-')} | Qty ${fmt(row.quantity || 0, 2)} / open ${fmt(openQty || 0, 2)} | Entry ${fmtPrice(row.entry)}</div>
-        <div class="demo-line">SL ${fmtPrice(row.stopLoss)} | TP1 ${fmtPrice(row.tp1)} | TP2 ${fmtPrice(row.tp2)}</div>
-        <div class="demo-line demo-pnl ${pnlClass}">Demo PnL ${Number(row.pnl || 0) >= 0 ? '+' : ''}$${fmt(row.pnl || 0, 2)}${reserved}${partial}${settled}</div>
+        <div class="demo-line">SL ${fmtPrice(row.stopLoss)} | TP1 ${fmtPrice(row.tp1)} | TP2 ${fmtPrice(row.tp2)} | TP3 ${fmtPrice(row.tp3)}</div>
+        <div class="demo-line demo-pnl ${pnlClass}">Demo PnL ${Number(row.pnl || 0) >= 0 ? '+' : ''}$${fmt(row.pnl || 0, 2)}${reserved}${partial}${tp2Partial}${settled}</div>
       </div>`;
     }).join('');
   }

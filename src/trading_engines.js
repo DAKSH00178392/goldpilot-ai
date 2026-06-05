@@ -303,15 +303,31 @@
     const empty = {strengthScore:0,rejectionScore:0,breakoutQuality:'none',direction:'neutral',reasons:[]};
     if(!candles || !candles.length) return empty;
     const last = candles[candles.length-1];
+    const prev = candles[candles.length-2] || last;
+    const next = candles[candles.length] || null;
     const range = candleRange(last);
     if(range === 0) return empty;
 
     const bodies = candles.map(candleBody);
     const avgBody = sma(bodies, Math.min(20, bodies.length)) || candleBody(last) || 1;
     const body = candleBody(last);
+    const prevBody = candleBody(prev) || body || 1;
     const closePos = (last.c - last.l) / range;
     const atr = calculateAtr(candles, 14) || range;
     const direction = last.c > last.o ? 'bullish' : last.c < last.o ? 'bearish' : 'neutral';
+    const volume = Number(last.v || 0);
+    const estimatedBuyVolume = volume * clamp(closePos, 0, 1);
+    const estimatedSellVolume = Math.max(0, volume - estimatedBuyVolume);
+    const delta = estimatedBuyVolume - estimatedSellVolume;
+    const deltas = candles.slice(-20).map(c => {
+      const r = candleRange(c) || 1;
+      const pos = clamp((c.c - c.l) / r, 0, 1);
+      const v = Number(c.v || 0);
+      return v * pos - (v * (1 - pos));
+    });
+    const avgAbsDelta = sma(deltas.map(v => Math.abs(v)), deltas.length) || Math.abs(delta) || 1;
+    const bullishTrap = direction === 'bullish' && delta < 0;
+    const bearishTrap = direction === 'bearish' && delta > 0;
 
     let strength = 0;
     strength += clamp((body / avgBody) * 25, 0, 35);
@@ -319,25 +335,73 @@
     if(direction === 'bullish') strength += closePos > 0.7 ? 25 : closePos > 0.55 ? 12 : 0;
     if(direction === 'bearish') strength += closePos < 0.3 ? 25 : closePos < 0.45 ? 12 : 0;
     if(body / range > 0.55) strength += 15;
+    if(direction === 'bullish' && delta > avgAbsDelta * 1.3) strength += 20;
+    if(direction === 'bearish' && Math.abs(delta) > avgAbsDelta * 1.3 && delta < 0) strength += 20;
+    if(bullishTrap || bearishTrap) strength -= 18;
 
     const upperWick = last.h - Math.max(last.c,last.o);
     const lowerWick = Math.min(last.c,last.o) - last.l;
+    const safeBody = body || range * 0.05 || 1;
+    const upperWickRatio = upperWick / safeBody;
+    const lowerWickRatio = lowerWick / safeBody;
     let rejection = 0;
     if(upperWick > body * 1.4 && closePos < 0.55) rejection += 45;
     if(lowerWick > body * 1.4 && closePos > 0.45) rejection += 45;
     rejection += clamp((Math.max(upperWick, lowerWick) / range) * 45, 0, 45);
+    let wickRatioScore = 0;
+    if(lowerWickRatio > 2) wickRatioScore += 25;
+    else if(lowerWickRatio > 1) wickRatioScore += 12;
+    else if(lowerWickRatio < 0.5 && direction === 'bullish') wickRatioScore -= 10;
+    if(upperWickRatio > 2) wickRatioScore += 25;
+    else if(upperWickRatio > 1) wickRatioScore += 12;
+    else if(upperWickRatio < 0.5 && direction === 'bearish') wickRatioScore -= 10;
+    rejection += wickRatioScore;
+
+    const bodyLow = Math.min(last.o, last.c);
+    const bodyHigh = Math.max(last.o, last.c);
+    const prevBodyLow = Math.min(prev.o, prev.c);
+    const prevBodyHigh = Math.max(prev.o, prev.c);
+    const bodyCoversPrev = bodyLow <= prevBodyLow && bodyHigh >= prevBodyHigh;
+    const bullEngulfBase = direction === 'bullish' && last.c > prev.o && last.o < prev.c && body > prevBody * 1.2;
+    const bearEngulfBase = direction === 'bearish' && last.c < prev.o && last.o > prev.c && body > prevBody * 1.2;
+    const engulfingConfirmed = !!(next && ((bullEngulfBase && next.c > next.o) || (bearEngulfBase && next.c < next.o)));
+    const engulfingScore = engulfingConfirmed ? 30 : (bullEngulfBase || bearEngulfBase) ? 10 : bodyCoversPrev ? -15 : 0;
+    strength += Math.max(0, engulfingScore);
+
+    let momentumRun = 1;
+    for(let i = candles.length - 2; i >= 0; i--){
+      const d = candles[i].c > candles[i].o ? 'bullish' : candles[i].c < candles[i].o ? 'bearish' : 'neutral';
+      if(d !== direction || d === 'neutral') break;
+      momentumRun++;
+    }
+    const singleCandleSpike = range > atr * 1.8 && momentumRun === 1;
+    const momentumScore = momentumRun >= 3 ? 20 : singleCandleSpike ? -15 : 0;
+    strength += momentumScore;
+    const exhaustionRisk = momentumRun >= 4 ? 'HIGH' : momentumRun >= 3 ? 'MEDIUM' : 'LOW';
 
     const reasons = [];
     if(body > avgBody * 1.5) reasons.push('large_body');
     if(direction === 'bullish' && closePos > 0.7) reasons.push('close_near_high');
     if(direction === 'bearish' && closePos < 0.3) reasons.push('close_near_low');
     if(rejection > 60) reasons.push('clear_rejection_wick');
+    if(bullishTrap) reasons.push('bullish_delta_trap');
+    if(bearishTrap) reasons.push('bearish_delta_trap');
+    if(engulfingScore > 0) reasons.push(engulfingConfirmed ? 'confirmed_engulfing' : 'engulfing_needs_followthrough');
+    if(momentumRun >= 3) reasons.push(`${momentumRun}_candle_momentum_run`);
+    if(singleCandleSpike) reasons.push('single_candle_bos_spike_risk');
 
     return {
       strengthScore: Math.round(clamp(strength, 0, 100)),
       rejectionScore: Math.round(clamp(rejection, 0, 100)),
       breakoutQuality: strength > 70 ? 'strong' : strength > 45 ? 'medium' : 'weak',
       direction,
+      delta:round(delta, 2),
+      avgAbsDelta:round(avgAbsDelta, 2),
+      bullishTrap,
+      bearishTrap,
+      wickRatios:{upper:round(upperWickRatio, 2), lower:round(lowerWickRatio, 2), score:wickRatioScore},
+      engulfing:{bullish:bullEngulfBase, bearish:bearEngulfBase, confirmed:engulfingConfirmed, score:engulfingScore},
+      momentum:{run:momentumRun, score:momentumScore, exhaustionRisk},
       reasons
     };
   }
@@ -1048,12 +1112,22 @@
     if(setup && sessionRules && !sideSessionOk){
       needs.push(`${sessionRules.session} session rules do not allow this setup yet`);
     }
+    const deltaTrap = side === 'LONG' ? candleBehavior.bullishTrap : side === 'SHORT' ? candleBehavior.bearishTrap : false;
+    const weakSweepRejection = /sweep/i.test(setup || '') && candleBehavior.wickRatios && candleBehavior.wickRatios.score < 0;
+    if(setup && deltaTrap){
+      needs.push(`${side} blocked by volume-delta trap candle`);
+      reasons.push('Candle direction conflicts with estimated volume delta');
+    }
+    if(setup && weakSweepRejection){
+      needs.push('Sweep entry needs stronger wick-to-body rejection');
+      reasons.push('Sweep rejection wick ratio is weak');
+    }
     if(setup && liquidityPathBlocked){
       needs.push(`${side} is running into nearby ${pathLiquidity.type} liquidity; wait for sweep/reaction or deeper retest`);
       reasons.push(`Nearby ${pathLiquidity.type} liquidity is too close for clean ${side} path`);
     }
 
-    if(setup && liquidityPathBlocked) quality = 'Watch';
+    if(setup && (liquidityPathBlocked || deltaTrap || weakSweepRejection)) quality = 'Watch';
     else if(setup && candleBehavior.strengthScore > 70) quality = 'High';
     else if(setup && (candleBehavior.strengthScore > 45 || candleBehavior.rejectionScore > 60)) quality = 'Medium';
     else if(setup && /watch/i.test(setup)) quality = 'Watch';
@@ -1069,6 +1143,8 @@
       trendOk:!trendQuality || trendQuality.score >= 45 || !/BOS|continuation|pullback/i.test(setup || ''),
       cryptoOk:!cryptoContext || !cryptoContext.chaseRisk || /sweep/i.test(setup || ''),
       liquidityPathOk:!liquidityPathBlocked,
+      deltaOk:!deltaTrap,
+      wickRejectionOk:!weakSweepRejection,
       pathLiquidity:pathLiquidity ? {
         type:pathLiquidity.type,
         price:pathLiquidity.price,
@@ -1102,6 +1178,8 @@
         trendOk:setup.trendOk,
         cryptoOk:setup.cryptoOk,
         liquidityPathOk:setup.liquidityPathOk,
+        deltaOk:setup.deltaOk,
+        wickRejectionOk:setup.wickRejectionOk,
         pathLiquidity:setup.pathLiquidity,
         retestOk:setup.retestOk,
         retestContext:setup.retestContext,
@@ -1368,6 +1446,14 @@
         score -= 20;
         missing.push('Nearby liquidity is in the trade path; wait for sweep/reaction or a deeper retest');
       }
+      if(setup.deltaOk === false){
+        score -= 22;
+        missing.push('Volume-delta trap: candle direction conflicts with estimated buying/selling pressure');
+      }
+      if(setup.wickRejectionOk === false){
+        score -= 18;
+        missing.push('Sweep rejection wick-to-body ratio is too weak');
+      }
       if(setup.retestOk === false){
         score -= 18;
         missing.push('Retest depth/rejection is not confirmed');
@@ -1427,6 +1513,8 @@
       && setup.trendOk !== false
       && setup.cryptoOk !== false
       && setup.liquidityPathOk !== false
+      && setup.deltaOk !== false
+      && setup.wickRejectionOk !== false
       && setup.retestOk !== false
       && setup.htfOk !== false
       && setup.sessionOk !== false;
@@ -1456,7 +1544,7 @@
     };
   }
 
-  function buildSignalGrade(setup, plan, risk, decisionState){
+  function buildSignalGrade(setup, plan, risk, decisionState, masterScore){
     const hardReasons = [];
     const softReasons = [];
     if(!setup || !setup.direction) hardReasons.push('No directional setup');
@@ -1467,16 +1555,22 @@
     if(setup && setup.htfOk === false) hardReasons.push('HTF zone conflict');
     if(setup && setup.cryptoOk === false) hardReasons.push('Crypto chase risk');
     if(setup && setup.liquidityPathOk === false) hardReasons.push('Nearby liquidity blocks trade path');
+    if(setup && setup.deltaOk === false) hardReasons.push('Volume-delta trap candle');
+    if(setup && setup.wickRejectionOk === false) hardReasons.push('Weak sweep rejection wick ratio');
     if(setup && setup.sessionOk === false) hardReasons.push('Session rule block');
     if(decisionState && !decisionState.directionalStructure) hardReasons.push('Missing BOS/CHOCH');
     if(decisionState && !decisionState.directionalCandle) hardReasons.push('Missing confirming candle');
+    if(masterScore && masterScore.score < 75) hardReasons.push('Master score below entry threshold');
     if(setup && setup.volumeOk === false) softReasons.push('Volume confirmation weak');
     if(setup && setup.trendOk === false) softReasons.push('Trend quality weak');
     if(setup && setup.retestOk === false) softReasons.push('Retest is partial or shallow');
+    if(masterScore && masterScore.score >= 75 && masterScore.score < 85) softReasons.push('Master score is entry-ready but not high-confidence');
 
     const score = decisionState ? decisionState.entryReadinessScore || 0 : 0;
     const grade = hardReasons.length ? 'D'
-      : score >= 90 && !softReasons.length ? 'A+'
+      : masterScore && masterScore.score >= 92 && score >= 90 && !softReasons.length ? 'A+'
+        : masterScore && masterScore.score >= 85 && score >= 80 ? 'A'
+          : score >= 90 && !softReasons.length ? 'A+'
         : score >= 80 && softReasons.length <= 1 ? 'A'
           : score >= 70 && softReasons.length <= 1 ? 'B+'
             : score >= 55 ? 'B'
@@ -1487,6 +1581,47 @@
       hardReasons,
       softReasons,
       summary:hardReasons[0] || softReasons[0] || 'All grade checks passed'
+    };
+  }
+
+  function buildMasterScore(setup, analysis, candleBehavior, liquidityMap, locationContext, volumeContext, htfAlignment, sessionRules, decisionState){
+    const side = setup && setup.direction;
+    const structure = {
+      htfAligned:setup && setup.htfOk !== false ? 10 : 0,
+      bosConfirmed:decisionState && decisionState.directionalStructure ? 8 : 0,
+      chochConviction:analysis.market && analysis.market.choch ? 7 : decisionState && decisionState.directionalCandle ? 5 : 0,
+      swingFresh:analysis.market && analysis.market.swings && analysis.market.swings.length ? 5 : 0
+    };
+    const lastSweep = (analysis.liquidity.stopHunts || []).slice(-1)[0];
+    const liquidity = {
+      cleanSweep:lastSweep ? 10 : liquidityMap && liquidityMap.actionableNearest && liquidityMap.actionableNearest.length ? 6 : 0,
+      orderBlock:locationContext && locationContext.orderBlocks && ((side === 'LONG' && locationContext.orderBlocks.long) || (side === 'SHORT' && locationContext.orderBlocks.short)) ? 8 : setup && setup.locationOk !== false ? 5 : 0,
+      fvg:locationContext && locationContext.fvg && ((side === 'LONG' && locationContext.fvg.long) || (side === 'SHORT' && locationContext.fvg.short)) ? 7 : setup && setup.liquidityPathOk !== false ? 5 : 0
+    };
+    const confluence = {
+      premiumDiscount:setup && setup.locationOk !== false ? 8 : 0,
+      rsiDivergence:setup && setup.trendOk !== false ? 7 : 0,
+      sessionActive:sessionRules && setup && setup.sessionOk !== false ? 6 : 0,
+      volumeConfirmation:volumeContext && volumeContext.confirmsBreakout ? 4 : 0
+    };
+    const candle = {
+      rejectionWick:candleBehavior && candleBehavior.wickRatios && Math.max(candleBehavior.wickRatios.upper, candleBehavior.wickRatios.lower) >= 1.5 ? 8 : 0,
+      engulfingConfirmed:candleBehavior && candleBehavior.engulfing && candleBehavior.engulfing.confirmed ? 7 : candleBehavior && candleBehavior.strengthScore >= 70 ? 5 : 0,
+      deltaPositive:setup && setup.deltaOk !== false && candleBehavior && ((side === 'LONG' && candleBehavior.delta >= 0) || (side === 'SHORT' && candleBehavior.delta <= 0)) ? 5 : 0
+    };
+    const structureScore = Object.values(structure).reduce((a,b)=>a+b,0);
+    const liquidityScore = Object.values(liquidity).reduce((a,b)=>a+b,0);
+    const confluenceScore = Object.values(confluence).reduce((a,b)=>a+b,0);
+    const candleScore = Object.values(candle).reduce((a,b)=>a+b,0);
+    const score = Math.round(clamp(structureScore + liquidityScore + confluenceScore + candleScore, 0, 100));
+    const tier = score >= 92 ? 'ELITE_SETUP' : score >= 85 ? 'HIGH_CONFIDENCE' : score >= 75 ? 'ENTRY_READY' : score >= 60 ? 'WATCH' : 'BLOCKED';
+    return {
+      score,
+      tier,
+      structure:{score:structureScore, max:30, details:structure},
+      liquidity:{score:liquidityScore, max:25, details:liquidity},
+      confluence:{score:confluenceScore, max:25, details:confluence},
+      candleQuality:{score:candleScore, max:20, details:candle}
     };
   }
 
@@ -1622,8 +1757,13 @@
     const minorTargets = selectedStop.minorTargets || [];
     const firstTarget = actionableTargets[0] || selectedStop.selectedTarget || null;
     const secondTarget = actionableTargets[1] || allTargets.find(t => firstTarget && t.price !== firstTarget.price && t.rewardDistance > firstTarget.rewardDistance) || null;
-    const tp1 = firstTarget ? firstTarget.price : null;
-    const tp2 = secondTarget ? secondTarget.price : tp1;
+    const atrTp1 = side === 'LONG' ? entry + atr * 1.5 : entry - atr * 1.5;
+    const targetPrices = [atrTp1, firstTarget && firstTarget.price, secondTarget && secondTarget.price]
+      .filter(v => v != null && isFinite(v) && rewardDistance(side, entry, v) > 0)
+      .sort((a,b) => rewardDistance(side, entry, a) - rewardDistance(side, entry, b));
+    const tp1 = targetPrices[0] || null;
+    const tp2 = targetPrices[1] || tp1;
+    const tp3 = targetPrices[2] || tp2;
     const rr = riskDistance && firstTarget ? rewardDistance(side, entry, firstTarget.price) / riskDistance : 0;
     const digits = priceDigits(entry);
     const targetQuality = !firstTarget ? 'No confirmed target'
@@ -1638,7 +1778,17 @@
       invalidation:round(stop,digits),
       invalidationReason,
       stopLoss:round(stop,digits),
-      takeProfit:{tp1:round(tp1,digits), tp2:round(tp2,digits)},
+      takeProfit:{
+        tp1:round(tp1,digits),
+        tp2:round(tp2,digits),
+        tp3:round(tp3,digits),
+        model:'ATR_DYNAMIC',
+        partials:{tp1:40,tp2:35,tp3:25},
+        atr:round(atr,digits),
+        breakevenAfter:'TP1',
+        trail:{enabled:true, after:'TP1', atrMultiple:0.8},
+        maxHoldCandles:12
+      },
       riskReward:round(rr,2),
       invalidationSource:selectedStop.source,
       invalidationOptimized:selectedStop.source !== 'Recent swing/sweep low' && selectedStop.source !== 'Recent swing/sweep high',
@@ -1680,6 +1830,10 @@
     const minorTargets = allTargets.filter(target => target.rewardDistance / riskDistance < CONFIG.minRiskReward);
     const firstTarget = actionableTargets[0] || allTargets[0] || null;
     const secondTarget = actionableTargets[1] || allTargets.find(t => firstTarget && t.price !== firstTarget.price && t.rewardDistance > firstTarget.rewardDistance) || null;
+    const atrTp1 = side === 'LONG' ? entry + atr * 1.5 : entry - atr * 1.5;
+    const targetPrices = [atrTp1, firstTarget && firstTarget.price, secondTarget && secondTarget.price]
+      .filter(v => v != null && isFinite(v) && rewardDistance(side, entry, v) > 0)
+      .sort((a,b) => rewardDistance(side, entry, a) - rewardDistance(side, entry, b));
     const rr = firstTarget ? rewardDistance(side, entry, firstTarget.price) / riskDistance : 0;
     return {
       side,
@@ -1689,8 +1843,15 @@
       invalidationReason:'Early trigger invalidation from formation plan',
       stopLoss:round(stop, digits),
       takeProfit:{
-        tp1:round(firstTarget ? firstTarget.price : null, digits),
-        tp2:round(secondTarget ? secondTarget.price : firstTarget ? firstTarget.price : null, digits)
+        tp1:round(targetPrices[0] || null, digits),
+        tp2:round(targetPrices[1] || targetPrices[0] || null, digits),
+        tp3:round(targetPrices[2] || targetPrices[1] || targetPrices[0] || null, digits),
+        model:'ATR_DYNAMIC',
+        partials:{tp1:40,tp2:35,tp3:25},
+        atr:round(atr,digits),
+        breakevenAfter:'TP1',
+        trail:{enabled:true, after:'TP1', atrMultiple:0.8},
+        maxHoldCandles:12
       },
       riskReward:round(rr, 2),
       invalidationSource:'Early trigger formation invalidation',
@@ -1893,6 +2054,8 @@
         trendOk:directional.long.trendOk,
         cryptoOk:directional.long.cryptoOk,
         liquidityPathOk:directional.long.liquidityPathOk,
+        deltaOk:directional.long.deltaOk,
+        wickRejectionOk:directional.long.wickRejectionOk,
         pathLiquidity:directional.long.pathLiquidity,
         retestOk:directional.long.retestOk,
         retestContext:directional.long.retestContext,
@@ -1913,6 +2076,8 @@
         trendOk:directional.short.trendOk,
         cryptoOk:directional.short.cryptoOk,
         liquidityPathOk:directional.short.liquidityPathOk,
+        deltaOk:directional.short.deltaOk,
+        wickRejectionOk:directional.short.wickRejectionOk,
         pathLiquidity:directional.short.pathLiquidity,
         retestOk:directional.short.retestOk,
         retestContext:directional.short.retestContext,
@@ -1932,13 +2097,14 @@
     const plan = buildTradePlan(candles, analysis, setup, liquidityMap);
     const risk = calculateRiskPermission(plan, context.account);
     const decisionState = evaluateDecisionState(analysis, setup, candleBehavior, tradability, risk, plan);
-    const signalGrade = buildSignalGrade(setup, plan, risk, decisionState);
+    const masterScore = buildMasterScore(setup, analysis, candleBehavior, liquidityMap, locationContext, volumeContext, htfAlignment, sessionRules, decisionState);
+    const signalGrade = buildSignalGrade(setup, plan, risk, decisionState, masterScore);
     const directionalStructure = hasDirectionalStructure(analysis, setup.direction);
     const nextStepForecast = buildNextStepForecast(analysis, candleBehavior, bias, regime, liquidityMap, directional.long, directional.short);
     const formationPlan = buildFormationPlan(candles, analysis, bias, liquidityMap, locationContext, htfAlignment, sessionRules);
     const earlyTrigger = evaluateEarlyTrigger(candles, analysis, candleBehavior, liquidityMap, formationPlan, directional, bias, locationContext, cryptoContext, context);
     const earlyRisk = earlyTrigger.tradePlan ? calculateRiskPermission(earlyTrigger.tradePlan, context.account) : null;
-    const earlyCommittable = !!(earlyTrigger.ready && earlyRisk && earlyRisk.allowed);
+    const earlyCommittable = !!(earlyTrigger.ready && earlyRisk && earlyRisk.allowed && masterScore.score >= 75);
     let outputPlan = plan;
     let outputRisk = risk;
     let outputSignalGrade = signalGrade;
@@ -2031,6 +2197,7 @@
       shortSetup:directional.short,
       preferredDirection,
       setupStage:decisionState.setupStage,
+      masterScore,
       signalGrade:outputSignalGrade,
       missingConditions:decisionState.missingConditions,
       entryReadinessScore:decisionState.entryReadinessScore,

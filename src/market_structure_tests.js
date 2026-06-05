@@ -67,6 +67,13 @@ ok(engineSource.includes("actionable:false"), 'engine marks previous-candle liqu
 ok(engineSource.includes('liquidityPathOk'), 'engine blocks trades running directly into nearby liquidity');
 ok(engineSource.includes('Nearby liquidity is in the trade path'), 'engine explains liquidity path risk');
 ok(engineSource.includes('Nearby liquidity blocks trade path'), 'signal grade treats liquidity path risk as a hard block');
+ok(engineSource.includes('bullishTrap'), 'engine detects bullish volume-delta trap candles');
+ok(engineSource.includes('bearishTrap'), 'engine detects bearish volume-delta trap candles');
+ok(engineSource.includes('wickRatios'), 'engine scores wick-to-body rejection ratios');
+ok(engineSource.includes('engulfing'), 'engine validates engulfing candle structure');
+ok(engineSource.includes('momentumRun'), 'engine scores consecutive candle momentum runs');
+ok(engineSource.includes('buildMasterScore'), 'engine builds weighted GoldPilot master score');
+ok(engineSource.includes('ELITE_SETUP'), 'master score supports elite setup tier');
 ok(engineSource.includes('isClosed !== false'), 'engine ignores still-forming candles for decisions');
 ok(engineSource.includes('hasDirectionalStructure'), 'engine requires setup-direction structure confirmation');
 ok(engineSource.includes('hasDirectionalCandle'), 'engine requires setup-direction candle confirmation');
@@ -81,6 +88,8 @@ ok(engineSource.includes('large liquidation-style wick keeps early trigger watch
 ok(engineSource.includes('counterBias'), 'engine treats bias as a score factor instead of a hard trend-only block');
 ok(engineSource.includes('minLotLoss'), 'risk engine reports minimum-size risk when below broker minimum');
 ok(engineSource.includes('marketTargetBased'), 'engine uses market target based TP planning');
+ok(engineSource.includes('ATR_DYNAMIC'), 'engine uses ATR dynamic TP planning');
+ok(engineSource.includes('tp3'), 'engine exposes TP3 for runner management');
 ok(engineSource.includes('No valid directional liquidity/structure target found'), 'engine refuses to invent far TP when no market target exists');
 ok(engineSource.includes('buildStopCandidates'), 'engine uses smart invalidation stop candidates');
 ok(engineSource.includes('Retest/rejection wick'), 'engine can use tighter retest wick invalidation');
@@ -201,6 +210,8 @@ ok(connectorJs.includes('settleDemoBalance'), 'closed demo trades settle realize
 ok(connectorJs.includes("if(row.status === 'CLOSED')"), 'already-closed demo trades are settled after refresh');
 ok(connectorJs.includes('openQuantity'), 'demo trades track open quantity after TP1 partial close');
 ok(connectorJs.includes('realizedPnl'), 'demo trades separate realized and floating PnL');
+ok(connectorJs.includes('tp3'), 'demo trades store TP3 runner target');
+ok(connectorJs.includes('tpPartials'), 'demo trades store dynamic TP partial percentages');
 ok(connectorJs.includes('BREAKEVEN_STOP'), 'committed trade state machine supports breakeven after TP1');
 ok(connectorJs.includes('breakEvenArmed'), 'demo trade management arms breakeven after TP1');
 ok(connectorJs.includes('tp2 != null'), 'committed signal TP checks ignore missing targets');
@@ -209,6 +220,7 @@ ok(dashboardHtml.includes('demo-trades'), 'dashboard exposes demo trades panel')
 ok(connectorJs.includes('nextStepForecast'), 'dashboard displays next-step forecast from engine');
 ok(connectorJs.includes('formationPlan'), 'dashboard displays future trade formation plan');
 ok(connectorJs.includes('earlyEntryZone'), 'dashboard displays early entry zone when no confirmed plan exists');
+ok(connectorJs.includes('masterScore'), 'dashboard displays master score and tier');
 ok(connectorJs.includes('decision.locationContext'), 'dashboard displays premium/discount location checks');
 ok(connectorJs.includes('decision.volumeContext'), 'dashboard displays volume confirmation checks');
 ok(connectorJs.includes('decision.trendQuality'), 'dashboard displays trend quality checks');
