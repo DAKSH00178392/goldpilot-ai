@@ -69,6 +69,10 @@ ok(engineSource.includes('buildNextStepForecast'), 'engine uses algorithmic next
 ok(engineSource.includes('buildFormationPlan'), 'engine builds future trade formation plans');
 ok(engineSource.includes('earlyEntryZone'), 'formation plan exposes early entry zone');
 ok(engineSource.includes('tooLateRule'), 'formation plan exposes no-chase late entry rule');
+ok(engineSource.includes('require real rejection, not only momentum'), 'engine requires rejection for poor-location early triggers');
+ok(engineSource.includes('show real rejection at the watched liquidity/zone'), 'engine requires real rejection for liquidity-approach early commits');
+ok(engineSource.includes('late-location liquidity triggers stay watch-only'), 'engine keeps wrong-range liquidity triggers watch-only');
+ok(engineSource.includes('large liquidation-style wick keeps early trigger watch-only'), 'engine blocks liquidation-wick early commits');
 ok(engineSource.includes('counterBias'), 'engine treats bias as a score factor instead of a hard trend-only block');
 ok(engineSource.includes('minLotLoss'), 'risk engine reports minimum-size risk when below broker minimum');
 ok(engineSource.includes('marketTargetBased'), 'engine uses market target based TP planning');

@@ -1684,7 +1684,7 @@
     };
   }
 
-  function evaluateEarlyTrigger(candles, analysis, candleBehavior, liquidityMap, formationPlan, directional, bias, context){
+  function evaluateEarlyTrigger(candles, analysis, candleBehavior, liquidityMap, formationPlan, directional, bias, locationContext, cryptoContext, context){
     if(!formationPlan || !formationPlan.active || formationPlan.phase !== 'EARLY_FORMING' || !formationPlan.side || !formationPlan.earlyEntryZone){
       return {
         active:false,
@@ -1729,6 +1729,12 @@
     const higherTfOpposes = !!(bias && ((side === 'LONG' && bias.bias === 'Bearish') || (side === 'SHORT' && bias.bias === 'Bullish')));
     const higherTfSupports = !!(bias && ((side === 'LONG' && bias.bias === 'Bullish') || (side === 'SHORT' && bias.bias === 'Bearish')));
     const needsActualTouch = formationPlan.source === 'liquidity-approach';
+    const rangeZone = locationContext && locationContext.range ? locationContext.range.zone : 'Unknown';
+    const poorEarlyLocation = needsActualTouch && (
+      (side === 'SHORT' && rangeZone === 'Discount') ||
+      (side === 'LONG' && rangeZone === 'Premium')
+    );
+    const liquidationWickRisk = !!(needsActualTouch && cryptoContext && cryptoContext.wickSweep);
     const reasons = [];
     let score = 45;
 
@@ -1749,12 +1755,16 @@
     if(needsActualTouch && !exactInteraction){ score -= 18; reasons.push('liquidity approach needs an actual touch/sweep before early entry'); }
     if(needsActualTouch && !higherTfSupports){ score -= 24; reasons.push('liquidity-approach early trigger needs higher-timeframe directional support'); }
     if(needsActualTouch && higherTfOpposes){ score -= 12; reasons.push('liquidity-approach early trigger is fighting higher-timeframe bias'); }
+    if(poorEarlyLocation && !rejection){ score -= 22; reasons.push(`${side} early trigger is in ${rangeZone}; require real rejection, not only momentum`); }
+    if(poorEarlyLocation && rejection){ score -= 35; reasons.push(`${side} early trigger is in ${rangeZone}; late-location liquidity triggers stay watch-only`); }
+    if(liquidationWickRisk){ score -= 20; reasons.push('large liquidation-style wick keeps early trigger watch-only'); }
     if(context && context.newsBlock){ score = 0; reasons.push('news block prevents early trigger'); }
 
     score = Math.round(clamp(score, 0, 100));
     const plan = buildEntryPlanFromPrice(candles, analysis, liquidityMap, side, last.c, invalidation, `${side} early liquidity trigger`);
     const targetOk = !!(plan && plan.riskReward >= CONFIG.minRiskReward);
-    const ready = score >= 78 && touchedWatched && (!needsActualTouch || exactInteraction) && closedAway && (rejection || decisiveBody) && notChased && validStop && !counterBias && !oppositeStrong && (!needsActualTouch || higherTfSupports) && targetOk;
+    const hasRequiredCandleProof = needsActualTouch ? rejection : (rejection || decisiveBody);
+    const ready = score >= 78 && touchedWatched && (!needsActualTouch || exactInteraction) && closedAway && hasRequiredCandleProof && !poorEarlyLocation && !liquidationWickRisk && notChased && validStop && !counterBias && !oppositeStrong && (!needsActualTouch || higherTfSupports) && targetOk;
     return {
       active:true,
       ready,
@@ -1766,7 +1776,7 @@
       requiredConditions:[
         'touch/sweep watched liquidity or zone',
         `close ${side === 'LONG' ? 'above' : 'below'} watched level`,
-        'show rejection or decisive body',
+        needsActualTouch ? 'show real rejection at the watched liquidity/zone' : 'show rejection or decisive body',
         'keep current entry close to trigger zone',
         'use valid formation invalidation',
         'market target must give at least 1:2 R:R'
@@ -1886,7 +1896,7 @@
     const directionalStructure = hasDirectionalStructure(analysis, setup.direction);
     const nextStepForecast = buildNextStepForecast(analysis, candleBehavior, bias, regime, liquidityMap, directional.long, directional.short);
     const formationPlan = buildFormationPlan(candles, analysis, bias, liquidityMap, locationContext, htfAlignment, sessionRules);
-    const earlyTrigger = evaluateEarlyTrigger(candles, analysis, candleBehavior, liquidityMap, formationPlan, directional, bias, context);
+    const earlyTrigger = evaluateEarlyTrigger(candles, analysis, candleBehavior, liquidityMap, formationPlan, directional, bias, locationContext, cryptoContext, context);
     const earlyRisk = earlyTrigger.tradePlan ? calculateRiskPermission(earlyTrigger.tradePlan, context.account) : null;
     const earlyCommittable = !!(earlyTrigger.ready && earlyRisk && earlyRisk.allowed);
     let outputPlan = plan;
