@@ -14,7 +14,7 @@ function json(data, status = 200){
     headers:{
       'content-type':'application/json; charset=utf-8',
       'access-control-allow-origin':'*',
-      'access-control-allow-methods':'GET, OPTIONS',
+      'access-control-allow-methods':'GET, POST, OPTIONS',
       'access-control-allow-headers':'content-type'
     }
   });
@@ -151,6 +151,54 @@ async function latestSignals(env, limit = 50){
   return results || [];
 }
 
+async function ensureDemoStateTable(env){
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS demo_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `).run();
+}
+
+function safeJsonParse(value, fallback){
+  try{
+    return value ? JSON.parse(value) : fallback;
+  } catch(err){
+    return fallback;
+  }
+}
+
+async function getDemoState(env){
+  await ensureDemoStateTable(env);
+  const {results} = await env.DB.prepare('SELECT key, value, updated_at FROM demo_state').all();
+  const rows = results || [];
+  const byKey = Object.fromEntries(rows.map(row => [row.key, row]));
+  return {
+    settings:safeJsonParse(byKey.settings && byKey.settings.value, null),
+    committedSignals:safeJsonParse(byKey.committedSignals && byKey.committedSignals.value, null),
+    demoTrades:safeJsonParse(byKey.demoTrades && byKey.demoTrades.value, null),
+    updatedAt:rows.reduce((latest, row) => !latest || row.updated_at > latest ? row.updated_at : latest, null)
+  };
+}
+
+async function putDemoState(env, body){
+  await ensureDemoStateTable(env);
+  const nowIso = new Date().toISOString();
+  const allowed = ['settings', 'committedSignals', 'demoTrades'];
+  for(const key of allowed){
+    if(body[key] === undefined) continue;
+    const value = JSON.stringify(body[key]);
+    if(value.length > 300000) throw new Error(`${key} payload is too large`);
+    await env.DB.prepare(`
+      INSERT INTO demo_state (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).bind(key, value, nowIso).run();
+  }
+  return getDemoState(env);
+}
+
 export default {
   async scheduled(event, env, ctx){
     ctx.waitUntil(runScan(env));
@@ -164,6 +212,15 @@ export default {
     }
     if(url.pathname === '/api/latest-signals'){
       return json({signals:await latestSignals(env, url.searchParams.get('limit'))});
+    }
+    if(url.pathname === '/api/demo-state'){
+      if(request.method === 'GET') return json({state:await getDemoState(env)});
+      if(request.method === 'POST'){
+        const body = await request.json().catch(() => null);
+        if(!body || typeof body !== 'object') return json({error:'Invalid JSON body'}, 400);
+        return json({ok:true, state:await putDemoState(env, body)});
+      }
+      return json({error:'Method not allowed'}, 405);
     }
     return json({ok:true, service:'GoldPilot scanner', endpoints:['/api/scan','/api/latest-signals']});
   }

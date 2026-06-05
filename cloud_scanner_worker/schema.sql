@@ -24,3 +24,9 @@ ON committed_signals(created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_committed_signals_symbol_created_at
 ON committed_signals(symbol, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS demo_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);

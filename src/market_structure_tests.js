@@ -132,6 +132,9 @@ const connectorJs = fs.readFileSync(connectorPath, 'utf8');
 const workerPath = path.join(__dirname, '..', 'cloud_scanner_worker', 'src', 'index.js');
 const workerJs = fs.readFileSync(workerPath, 'utf8');
 ok(connectorJs.includes('goldpilotRiskSettings'), 'live connector persists risk settings');
+ok(connectorJs.includes('hydrateCloudDemoState'), 'live connector hydrates shared cloud demo state');
+ok(connectorJs.includes('syncCloudDemoState'), 'live connector pushes demo state to cloud');
+ok(connectorJs.includes('/api/demo-state'), 'live connector uses shared demo-state API');
 ok(connectorJs.includes('goldpilotSignalJournal'), 'live connector persists signal journal');
 ok(connectorJs.includes('goldpilotTradeJournal'), 'live connector separates trade journal for daily limits');
 ok(connectorJs.includes('appendTradeReview'), 'live connector can save trade reviews');
@@ -210,7 +213,11 @@ ok(workerJs.includes('scheduled(event, env, ctx)'), 'cloud scanner worker has sc
 ok(workerJs.includes('/api/latest-signals'), 'cloud scanner worker exposes latest signals API');
 ok(workerJs.includes('committed_signals'), 'cloud scanner worker stores committed signals');
 ok(workerJs.includes('signalGrade.committable'), 'cloud scanner worker commits only graded signals');
+ok(workerJs.includes('/api/demo-state'), 'cloud scanner worker exposes shared demo state API');
+ok(workerJs.includes('demo_state'), 'cloud scanner worker stores shared demo state');
 ok(fs.existsSync(path.join(__dirname, '..', 'cloud_scanner_worker', 'schema.sql')), 'cloud scanner worker includes D1 schema');
+const workerSchema = fs.readFileSync(path.join(__dirname, '..', 'cloud_scanner_worker', 'schema.sql'), 'utf8');
+ok(workerSchema.includes('demo_state'), 'cloud scanner worker schema includes demo state table');
 
 // 6) Return success
 console.log('\nAll market structure smoke tests passed.');

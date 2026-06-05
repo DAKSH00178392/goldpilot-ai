@@ -5,6 +5,7 @@
     primaryTimeframe: '15m',
     refreshMs: 60000,
     candlesLimit: 240,
+    cloudApiBase: '',
     account: {
       balance: 1000,
       riskPct: 1,
@@ -41,6 +42,9 @@
   let liveNewsEvents = [];
   let liveNewsFetchedAt = 0;
   let newsSourceStatus = 'Manual';
+  let cloudHydrated = false;
+  let cloudSyncTimer = null;
+  let cloudSyncInFlight = false;
 
   function qs(selector){ return document.querySelector(selector); }
   function qsa(selector){ return Array.from(document.querySelectorAll(selector)); }
@@ -186,10 +190,88 @@
     return Math.max(min, Math.min(max, value));
   }
 
+  function cloudApiBase(){
+    const explicit = window.GOLDPILOT_API_BASE || localStorage.getItem('goldpilotCloudApiBase') || CONFIG.cloudApiBase;
+    if(explicit) return String(explicit).replace(/\/$/, '');
+    return location.protocol.indexOf('http') === 0 ? location.origin : '';
+  }
+
+  function cloudApiEnabled(){
+    return !!cloudApiBase();
+  }
+
+  async function cloudApi(path, options={}){
+    const base = cloudApiBase();
+    if(!base) throw new Error('Cloud API base is not configured');
+    const res = await fetch(`${base}${path}`, Object.assign({
+      headers:{'content-type':'application/json'}
+    }, options));
+    if(!res.ok) throw new Error(`Cloud API ${res.status}`);
+    return res.json();
+  }
+
+  function currentDemoState(){
+    return {
+      settings,
+      committedSignals:loadCommittedSignals(),
+      demoTrades:loadDemoTrades()
+    };
+  }
+
+  function scheduleCloudDemoSync(){
+    if(!cloudHydrated || !cloudApiEnabled()) return;
+    clearTimeout(cloudSyncTimer);
+    cloudSyncTimer = setTimeout(() => {
+      syncCloudDemoState().catch(err => console.warn('cloud demo sync failed', err));
+    }, 700);
+  }
+
+  async function syncCloudDemoState(){
+    if(!cloudApiEnabled() || cloudSyncInFlight) return;
+    cloudSyncInFlight = true;
+    try{
+      await cloudApi('/api/demo-state', {
+        method:'POST',
+        body:JSON.stringify(currentDemoState())
+      });
+    } finally {
+      cloudSyncInFlight = false;
+    }
+  }
+
+  async function hydrateCloudDemoState(){
+    if(!cloudApiEnabled()){
+      cloudHydrated = true;
+      return;
+    }
+    try{
+      const data = await cloudApi('/api/demo-state');
+      const state = data && data.state || {};
+      const hasCloudState = !!(state.settings || state.committedSignals || state.demoTrades);
+      if(state.settings){
+        settings = sanitizeSettings(state.settings);
+        localStorage.setItem('goldpilotRiskSettings', JSON.stringify(settings));
+        syncSettingsForm();
+      }
+      if(state.committedSignals && typeof state.committedSignals === 'object'){
+        localStorage.setItem('goldpilotCommittedSignals', JSON.stringify(state.committedSignals));
+      }
+      if(Array.isArray(state.demoTrades)){
+        localStorage.setItem('goldpilotDemoTrades', JSON.stringify(state.demoTrades.slice(0, 25)));
+      }
+      cloudHydrated = true;
+      if(!hasCloudState) scheduleCloudDemoSync();
+    } catch(err){
+      cloudHydrated = true;
+      console.warn('cloud demo hydrate failed; using local state', err);
+    }
+  }
+
   function saveSettings(nextSettings){
     settings = sanitizeSettings(nextSettings);
     localStorage.setItem('goldpilotRiskSettings', JSON.stringify(settings));
     syncSettingsForm();
+    scheduleCloudDemoSync();
   }
 
   function readSettingsForm(){
@@ -267,6 +349,7 @@
 
   function saveCommittedSignals(signals){
     localStorage.setItem('goldpilotCommittedSignals', JSON.stringify(signals || {}));
+    scheduleCloudDemoSync();
   }
 
   function closeCommittedSignalForDemo(row){
@@ -296,6 +379,7 @@
 
   function saveDemoTrades(rows){
     localStorage.setItem('goldpilotDemoTrades', JSON.stringify(rows.slice(0, 25)));
+    scheduleCloudDemoSync();
   }
 
   function pnlForQuantity(trade, price, quantity){
@@ -2021,6 +2105,8 @@
     tickClock();
     setInterval(tickClock, 1000);
     try{
+      await hydrateCloudDemoState();
+      renderDemoTrades();
       await refreshMarketData();
       scanWatchlist().catch(err => console.error('watchlist scan', err));
       refreshTimer = setInterval(() => {
