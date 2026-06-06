@@ -430,6 +430,30 @@
     return latestTicker && latestTicker.last ? latestTicker.last : latestCandle ? latestCandle.c : null;
   }
 
+  function planPriceReference(){
+    const price = currentMarketPrice();
+    if(price != null && isFinite(Number(price)) && Number(price) > 0) return Number(price);
+    const candles = candlesByTimeframe[activeTimeframe] || candlesByTimeframe['15M'] || [];
+    const latestCandle = candles[candles.length - 1];
+    return latestCandle && latestCandle.c > 0 ? Number(latestCandle.c) : null;
+  }
+
+  function isTradePlanPriceCompatible(plan, referencePrice=planPriceReference()){
+    if(!plan || referencePrice == null || !isFinite(Number(referencePrice)) || Number(referencePrice) <= 0) return !!plan;
+    const ref = Number(referencePrice);
+    const entry = Number(plan.entry);
+    if(!isFinite(entry) || entry <= 0) return false;
+    const entryRatio = entry / ref;
+    if(entryRatio < 0.25 || entryRatio > 4) return false;
+    const zone = Array.isArray(plan.entryZone) ? plan.entryZone.map(Number).filter(Number.isFinite) : [];
+    if(zone.length){
+      const center = zone.reduce((sum, value) => sum + value, 0) / zone.length;
+      const zoneRatio = center / ref;
+      if(zoneRatio < 0.25 || zoneRatio > 4) return false;
+    }
+    return true;
+  }
+
   async function fetchSymbolLastPrice(symbol){
     const normalized = String(symbol || '').toUpperCase();
     if(!normalized) return null;
@@ -609,6 +633,7 @@
 
   function commitDecision(decision){
     if(!isCommittableDecision(decision) || !decision.tradePlan) return null;
+    if(!isTradePlanPriceCompatible(decision.tradePlan)) return null;
     const signals = loadCommittedSignals();
     const key = committedKey();
     const existing = signals[key];
@@ -666,6 +691,7 @@
 
   function isCommittableDecision(decision){
     if(!(decision && decision.tradePlan && decision.signalGrade && decision.signalGrade.committable)) return false;
+    if(!isTradePlanPriceCompatible(decision.tradePlan)) return false;
     if(!settings.aiEnabled) return true;
     const ai = decision.aiDecision || aiDecisionCache[decisionSignature(decision)];
     if(!ai) return false;
@@ -912,7 +938,8 @@
 
   function displayTradePlan(decision){
     const candidate = bestSetupCandidate(decision);
-    return decision.tradePlan || (candidate && candidate.tradePlan) || null;
+    const plan = decision.tradePlan || (candidate && candidate.tradePlan) || null;
+    return isTradePlanPriceCompatible(plan) ? plan : null;
   }
 
   function displaySetup(decision){
@@ -1259,7 +1286,9 @@
         : decision.preferredDirection === 'SHORT'
           ? decision.shortSetup
           : null;
-      const plan = decision.tradePlan || (preferredCandidate && preferredCandidate.tradePlan) || null;
+      const rawPlan = decision.tradePlan || (preferredCandidate && preferredCandidate.tradePlan) || null;
+      const referencePrice = confirmedM15.length ? confirmedM15[confirmedM15.length - 1].c : null;
+      const plan = isTradePlanPriceCompatible(rawPlan, referencePrice) ? rawPlan : null;
       const setup = decision.setup && decision.setup.setup
         ? decision.setup.setup
         : decision.earlyTrigger && decision.earlyTrigger.ready

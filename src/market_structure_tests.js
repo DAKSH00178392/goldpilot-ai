@@ -192,6 +192,7 @@ ok(connectorJs.includes("tickValuePerLot:1"), 'Binance spot symbols use quantity
 ok(connectorJs.includes('bestSetupCandidate'), 'dashboard uses best setup candidate when primary setup is empty');
 ok(connectorJs.includes('displayReadinessScore'), 'dashboard uses consistent best-candidate readiness score');
 ok(connectorJs.includes('displayTradePlan'), 'dashboard displays fallback candidate trade plan');
+ok(connectorJs.includes('isTradePlanPriceCompatible'), 'dashboard rejects stale cross-symbol trade plan price scales');
 ok(connectorJs.includes("setPrimarySymbol(row.getAttribute('data-symbol'), '15M')"), 'watchlist opens matching 15M focused dashboard');
 ok(connectorJs.includes('renderPriceAxis'), 'dashboard chart renders price axis and current price marker');
 ok(dashboardHtml.includes('current-price-marker'), 'chart SVG has current price marker layer');
@@ -248,6 +249,7 @@ ok(workerJs.includes('demo_state'), 'cloud scanner worker stores shared demo sta
 ok(fs.existsSync(path.join(__dirname, '..', 'cloud_scanner_worker', 'schema.sql')), 'cloud scanner worker includes D1 schema');
 const workerSchema = fs.readFileSync(path.join(__dirname, '..', 'cloud_scanner_worker', 'schema.sql'), 'utf8');
 ok(workerSchema.includes('demo_state'), 'cloud scanner worker schema includes demo state table');
+ok(!engineSource.includes('Spread is elevated for XAUUSD risk control'), 'engine uses symbol-aware spread warning text');
 
 // 6) Return success
 console.log('\nAll market structure smoke tests passed.');

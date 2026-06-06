@@ -494,6 +494,7 @@
     const now = context.now || new Date();
     const session = detectSession(now);
     const last = candles[candles.length-1];
+    const symbol = context.account && context.account.symbol ? context.account.symbol : 'symbol';
     const atr = calculateAtr(candles, 14);
     const atrPct = last && last.c ? atr / last.c : 0;
     const spread = Number(context.market.spread || 0);
@@ -510,7 +511,7 @@
 
     if(spread && last && spread / last.c > 0.00035){
       status = 'BLOCKED';
-      reasons.push('Spread is elevated for XAUUSD risk control');
+      reasons.push(`Spread is elevated for ${symbol} risk control`);
     }
     if(session === 'Rollover'){
       status = status === 'BLOCKED' ? status : 'WAIT';
@@ -2101,7 +2102,8 @@
     const context = normalizeDecisionInput(input);
     const candles = context.primaryCandles;
     if(!candles || candles.length < 5){
-      return {tradeStatus:'WAIT', reason:['Not enough candle data for market structure'], nextConditionNeeded:['Load more XAUUSD candles']};
+      const symbol = context.account && context.account.symbol ? context.account.symbol : 'market';
+      return {tradeStatus:'WAIT', reason:['Not enough candle data for market structure'], nextConditionNeeded:[`Load more ${symbol} candles`]};
     }
 
     const analysis = analyzeMarket(candles);
