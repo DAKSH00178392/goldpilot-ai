@@ -44,6 +44,7 @@ ok(decision.longSetup && decision.shortSetup && decision.preferredDirection, 'Go
 ok(decision.nextStepForecast && decision.nextStepForecast.nextCandleMust, 'GoldPilot decision returns next-step candle forecast');
 ok(decision.formationPlan && decision.formationPlan.phase, 'GoldPilot decision returns future trade formation plan');
 ok(decision.earlyTrigger && decision.earlyTrigger.stage, 'GoldPilot decision returns early trigger validation state');
+ok(decision.aiAdvisor && decision.aiAdvisor.summary && decision.aiAdvisor.nextBestActions, 'GoldPilot decision returns AI advisor desk read');
 for(const candidate of [decision.longSetup, decision.shortSetup]){
   if(candidate && candidate.tradePlan){
     const p = candidate.tradePlan;
@@ -73,6 +74,7 @@ ok(engineSource.includes('wickRatios'), 'engine scores wick-to-body rejection ra
 ok(engineSource.includes('engulfing'), 'engine validates engulfing candle structure');
 ok(engineSource.includes('momentumRun'), 'engine scores consecutive candle momentum runs');
 ok(engineSource.includes('buildMasterScore'), 'engine builds weighted GoldPilot master score');
+ok(engineSource.includes('buildAiAdvisor'), 'engine builds AI advisor narrative layer');
 ok(engineSource.includes('ELITE_SETUP'), 'master score supports elite setup tier');
 ok(engineSource.includes('isClosed !== false'), 'engine ignores still-forming candles for decisions');
 ok(engineSource.includes('hasDirectionalStructure'), 'engine requires setup-direction structure confirmation');
@@ -221,6 +223,7 @@ ok(connectorJs.includes('nextStepForecast'), 'dashboard displays next-step forec
 ok(connectorJs.includes('formationPlan'), 'dashboard displays future trade formation plan');
 ok(connectorJs.includes('earlyEntryZone'), 'dashboard displays early entry zone when no confirmed plan exists');
 ok(connectorJs.includes('masterScore'), 'dashboard displays master score and tier');
+ok(connectorJs.includes('GoldPilot AI Read'), 'dashboard displays AI advisor narrative');
 ok(connectorJs.includes('decision.locationContext'), 'dashboard displays premium/discount location checks');
 ok(connectorJs.includes('decision.volumeContext'), 'dashboard displays volume confirmation checks');
 ok(connectorJs.includes('decision.trendQuality'), 'dashboard displays trend quality checks');

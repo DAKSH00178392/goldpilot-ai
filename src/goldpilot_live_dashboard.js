@@ -1224,9 +1224,25 @@
     if(forecast && forecast.expectation){
       reasons.push(`Next-step read (${forecast.confidence}%): ${forecast.expectation}. ${forecast.nextCandleMust}`);
     }
-    setHtml('#status-reason', reasons.length
-      ? `<b>${decision.tradeStatus}.</b> ${reasons.map(escapeHtml).join(' ')}`
-      : '<b>WAIT.</b> No engine reason returned yet.');
+    const advisor = decision.aiAdvisor;
+    if(advisor){
+      const advisorHtml = [
+        `<b>GoldPilot AI Read:</b> ${escapeHtml(advisor.summary)}`,
+        `<br><span style="color:var(--text2)">Primary:</span> ${escapeHtml(advisor.primaryIdea)}.`,
+        `<br><span style="color:var(--text2)">Next:</span> ${escapeHtml((advisor.nextBestActions || [])[0] || 'Wait for a cleaner confirming candle.')}`,
+        advisor.mistakeWarning && advisor.mistakeWarning.length
+          ? `<br><span style="color:var(--red)">Warning:</span> ${escapeHtml(advisor.mistakeWarning[0])}`
+          : '',
+        advisor.oppositeScenario
+          ? `<br><span style="color:var(--text2)">Other side:</span> ${escapeHtml(advisor.oppositeScenario)}`
+          : ''
+      ].join('');
+      setHtml('#status-reason', advisorHtml);
+    } else {
+      setHtml('#status-reason', reasons.length
+        ? `<b>${decision.tradeStatus}.</b> ${reasons.map(escapeHtml).join(' ')}`
+        : '<b>WAIT.</b> No engine reason returned yet.');
+    }
   }
 
   function renderChart(candles){
@@ -1465,6 +1481,10 @@
     if(time) time.textContent = decision.tradeStatus.includes('COMMITTED') ? 'Committed' : isCommittableDecision(decision) ? `Ready ${decision.signalGrade.grade}` : 'Forming';
     if(clear) clear.style.display = decision.tradeStatus.includes('COMMITTED') ? 'inline-flex' : 'none';
     if(hint){
+      if(decision.aiAdvisor){
+        hint.textContent = `${decision.aiAdvisor.primaryIdea}. ${((decision.aiAdvisor.nextBestActions || [])[0] || decision.aiAdvisor.summary)} ${decision.aiAdvisor.mistakeWarning && decision.aiAdvisor.mistakeWarning[0] ? `Warning: ${decision.aiAdvisor.mistakeWarning[0]}` : ''}`;
+        return;
+      }
       const forecast = decision.nextStepForecast;
       const targetNote = plan && plan.targetQuality ? ` Target quality: ${plan.targetQuality}. ${plan.targetWarning || ''}` : '';
       const formation = decision.formationPlan;

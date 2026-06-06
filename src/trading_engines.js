@@ -1625,6 +1625,83 @@
     };
   }
 
+  function buildAiAdvisor(decision){
+    const setup = decision.setup || {};
+    const plan = decision.tradePlan;
+    const side = plan ? plan.side : setup.direction;
+    const master = decision.masterScore || {};
+    const forecast = decision.nextStepForecast || {};
+    const formation = decision.formationPlan || {};
+    const candle = decision.candleBehavior || {};
+    const liquidity = decision.liquidityMap || {};
+    const nearest = (liquidity.actionableNearest || liquidity.nearest || [])[0] || null;
+    const reasons = [];
+    const nextActions = [];
+    const warnings = [];
+    let posture = 'WAIT';
+    let primaryIdea = 'No clean trade idea yet';
+    let oppositeScenario = 'Opposite scenario is not defined yet';
+
+    if(decision.tradeStatus === 'BLOCKED' || master.tier === 'BLOCKED'){
+      posture = 'BLOCK';
+      reasons.push('The engine does not have enough aligned proof for a committed trade.');
+    } else if(decision.signalGrade && decision.signalGrade.committable && plan){
+      posture = master.score >= 85 ? 'HIGH_CONFIDENCE' : 'ENTRY_READY';
+      reasons.push(`${side} has enough alignment for demo consideration, but it still needs disciplined execution.`);
+    } else if(setup.direction || formation.side){
+      posture = 'WATCH';
+      reasons.push('A setup is forming, but the trigger is not mature enough for auto-commit.');
+    }
+
+    if(side && setup.setup){
+      primaryIdea = `${side} ${setup.setup}`;
+    } else if(formation.side){
+      primaryIdea = `${formation.side} formation watch`;
+    } else if(forecast.expectation){
+      primaryIdea = forecast.expectation;
+    }
+
+    if(side === 'LONG'){
+      oppositeScenario = 'If price fails to reclaim sell-side liquidity or prints bearish BOS, long idea is invalid and short continuation can take control.';
+    } else if(side === 'SHORT'){
+      oppositeScenario = 'If price reclaims buy-side liquidity or prints bullish BOS, short idea is invalid and long reversal can take control.';
+    } else {
+      oppositeScenario = 'Wait for either a clean sweep/reclaim or a confirmed BOS before choosing direction.';
+    }
+
+    if(decision.tradeStatus === 'BLOCKED') warnings.push(...(decision.reason || []).slice(0, 2));
+    if(decision.signalGrade && decision.signalGrade.hardReasons && decision.signalGrade.hardReasons.length){
+      warnings.push(...decision.signalGrade.hardReasons.slice(0, 3));
+    }
+    if(candle.bullishTrap) warnings.push('Bullish candle has negative estimated delta; avoid buying into a possible trap.');
+    if(candle.bearishTrap) warnings.push('Bearish candle has positive estimated delta; avoid shorting into a possible trap.');
+    if(setup.liquidityPathOk === false) warnings.push('Nearest liquidity is directly in the trade path; wait for sweep/reaction.');
+    if(candle.momentum && candle.momentum.exhaustionRisk === 'HIGH') warnings.push('Four or more same-direction candles suggest exhaustion risk; wait for pause/retest.');
+    if(nearest && !warnings.length) warnings.push(`Nearest actionable liquidity is ${nearest.type} near ${round(nearest.price, priceDigits(nearest.price))}.`);
+
+    if(plan && decision.signalGrade && decision.signalGrade.committable){
+      nextActions.push(`Entry only inside ${round(plan.entryZone[0], priceDigits(plan.entry))}-${round(plan.entryZone[1], priceDigits(plan.entry))}; invalid below/above ${round(plan.stopLoss, priceDigits(plan.stopLoss))}.`);
+      if(plan.takeProfit) nextActions.push(`Manage dynamically: TP1 ${round(plan.takeProfit.tp1, priceDigits(plan.entry))}, then breakeven and runner toward TP2/TP3.`);
+    } else {
+      nextActions.push(...(decision.nextConditionNeeded || []).slice(0, 3));
+      if(forecast.nextCandleMust) nextActions.push(forecast.nextCandleMust);
+      if(formation.trigger) nextActions.push(formation.trigger);
+    }
+
+    const summary = `${posture}: ${primaryIdea}. ${warnings[0] ? `Main warning: ${warnings[0]}` : 'No immediate execution edge yet.'}`;
+    return {
+      posture,
+      primaryIdea,
+      confidence:master.score || 0,
+      summary,
+      why:(reasons.length ? reasons : ['GoldPilot is waiting for stronger confluence.']).slice(0, 4),
+      mistakeWarning:[...new Set(warnings)].slice(0, 5),
+      nextBestActions:[...new Set(nextActions.filter(Boolean))].slice(0, 5),
+      oppositeScenario,
+      tone:posture === 'BLOCK' ? 'defensive' : posture === 'WATCH' ? 'patient' : 'execution-ready'
+    };
+  }
+
   function recentLow(candles, count){
     let low = Infinity;
     for(let i=Math.max(0, candles.length-count); i<candles.length; i++) low = Math.min(low, candles[i].l);
@@ -2174,7 +2251,7 @@
     if(liquidityMap.warning && tradeStatus !== 'BLOCKED') reason.push(liquidityMap.warning);
     if(cryptoContext.warnings && cryptoContext.warnings.length && tradeStatus !== 'BLOCKED') reason.push(...cryptoContext.warnings.slice(0, 2));
 
-    return {
+    const decisionOutput = {
       product:'GoldPilot AI',
       tradeStatus,
       bias,
@@ -2221,6 +2298,8 @@
       nextConditionNeeded,
       rawAnalysis:analysis
     };
+    decisionOutput.aiAdvisor = buildAiAdvisor(decisionOutput);
+    return decisionOutput;
   }
 
   function candlesLast(candles){ return candles[candles.length-1].c; }
