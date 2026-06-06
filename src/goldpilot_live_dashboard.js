@@ -12,7 +12,10 @@
       minLot: 0.01,
       tickValuePerLot: 1,
       maxDailyLossPct: 3,
-      maxTradesPerDay: 3
+      maxTradesPerDay: 3,
+      aiEnabled: false,
+      aiModel: 'qwen2.5:3b',
+      aiEndpoint: 'http://localhost:11434/api/chat'
     }
   };
 
@@ -45,6 +48,8 @@
   let cloudHydrated = false;
   let cloudSyncTimer = null;
   let cloudSyncInFlight = false;
+  const aiDecisionCache = {};
+  const aiDecisionInFlight = {};
 
   function qs(selector){ return document.querySelector(selector); }
   function qsa(selector){ return Array.from(document.querySelectorAll(selector)); }
@@ -174,7 +179,10 @@
       minLot: Math.max(0.01, Number(raw.minLot) || CONFIG.account.minLot),
       tickValuePerLot: Math.max(1, Number(raw.tickValuePerLot) || CONFIG.account.tickValuePerLot),
       maxDailyLossPct: clampNumber(Number(raw.maxDailyLossPct) || CONFIG.account.maxDailyLossPct, 0.5, 20),
-      maxTradesPerDay: Math.max(1, Math.round(Number(raw.maxTradesPerDay) || CONFIG.account.maxTradesPerDay))
+      maxTradesPerDay: Math.max(1, Math.round(Number(raw.maxTradesPerDay) || CONFIG.account.maxTradesPerDay)),
+      aiEnabled: raw.aiEnabled === true || raw.aiEnabled === 'true' || raw.aiEnabled === 'on',
+      aiModel: String(raw.aiModel || CONFIG.account.aiModel),
+      aiEndpoint: String(raw.aiEndpoint || CONFIG.account.aiEndpoint)
     };
   }
 
@@ -281,7 +289,10 @@
       minLot: qs('#setting-min-lot')?.value,
       tickValuePerLot: qs('#setting-tick-value')?.value,
       maxDailyLossPct: qs('#setting-daily-loss')?.value,
-      maxTradesPerDay: qs('#setting-max-trades')?.value
+      maxTradesPerDay: qs('#setting-max-trades')?.value,
+      aiEnabled: qs('#setting-ai-enabled')?.checked,
+      aiModel: qs('#setting-ai-model')?.value,
+      aiEndpoint: qs('#setting-ai-endpoint')?.value
     });
   }
 
@@ -292,12 +303,16 @@
       ['#setting-min-lot', settings.minLot],
       ['#setting-tick-value', settings.tickValuePerLot],
       ['#setting-daily-loss', settings.maxDailyLossPct],
-      ['#setting-max-trades', settings.maxTradesPerDay]
+      ['#setting-max-trades', settings.maxTradesPerDay],
+      ['#setting-ai-model', settings.aiModel],
+      ['#setting-ai-endpoint', settings.aiEndpoint]
     ];
     pairs.forEach(([selector, value]) => {
       const el = qs(selector);
       if(el) el.value = value;
     });
+    const ai = qs('#setting-ai-enabled');
+    if(ai) ai.checked = !!settings.aiEnabled;
   }
 
   function getJournalStats(){
@@ -650,7 +665,16 @@
   }
 
   function isCommittableDecision(decision){
-    return !!(decision && decision.tradePlan && decision.signalGrade && decision.signalGrade.committable);
+    if(!(decision && decision.tradePlan && decision.signalGrade && decision.signalGrade.committable)) return false;
+    if(!settings.aiEnabled) return true;
+    const ai = decision.aiDecision || aiDecisionCache[decisionSignature(decision)];
+    if(!ai) return false;
+    return ai.finalDecision === 'APPROVE' && Number(ai.confidence || 0) >= 65 && ai.isLate !== true;
+  }
+
+  function aiDecisionAllowsWatch(decision){
+    const ai = decision && (decision.aiDecision || aiDecisionCache[decisionSignature(decision)]);
+    return !!(ai && ['WAIT','BLOCK','LATE'].includes(ai.finalDecision));
   }
 
   function loadActiveCommittedSignal(){
@@ -710,6 +734,152 @@
       plan.stopLoss,
       plan.takeProfit && plan.takeProfit.tp1
     ].join('|');
+  }
+
+  function buildAiDecisionFacts(decision){
+    const plan = displayTradePlan(decision);
+    const setup = displaySetup(decision);
+    return {
+      symbol:CONFIG.symbol,
+      timeframe:activeTimeframe,
+      tradeStatus:decision.tradeStatus,
+      setupStage:decision.setupStage,
+      setup:setup ? setup.setup : null,
+      side:plan ? plan.side : decision.preferredDirection,
+      bias:decision.bias,
+      regime:decision.regime,
+      masterScore:decision.masterScore,
+      signalGrade:decision.signalGrade,
+      liquidity:{
+        nearest:decision.liquidityMap ? decision.liquidityMap.actionableNearest || decision.liquidityMap.nearest : [],
+        warning:decision.liquidityMap ? decision.liquidityMap.warning : null
+      },
+      candle:decision.candleBehavior,
+      location:decision.locationContext,
+      trendQuality:decision.trendQuality,
+      cryptoRisk:decision.cryptoContext,
+      htfAlignment:decision.htfAlignment,
+      sessionRules:decision.sessionRules,
+      tradePlan:plan ? {
+        side:plan.side,
+        entry:plan.entry,
+        entryZone:plan.entryZone,
+        stopLoss:plan.stopLoss,
+        takeProfit:plan.takeProfit,
+        riskReward:plan.riskReward,
+        targetQuality:plan.targetQuality,
+        targetWarning:plan.targetWarning
+      } : null,
+      missingConditions:decision.missingConditions,
+      engineReasons:decision.reason,
+      nextConditionNeeded:decision.nextConditionNeeded,
+      requiredOutput:{
+        finalDecision:'APPROVE | WAIT | BLOCK | LATE',
+        bestDirection:'LONG | SHORT | WAIT',
+        longProbability:'0-100',
+        shortProbability:'0-100',
+        waitProbability:'0-100',
+        entryTiming:'EARLY_FORMING | ENTRY_READY | LATE | NO_TRADE',
+        isLate:'boolean',
+        nextTrigger:'string',
+        entryZone:'array or null',
+        invalidation:'number or null',
+        confidence:'0-100',
+        reasonCodes:'array of snake_case strings'
+      }
+    };
+  }
+
+  function extractJsonObject(text){
+    const raw = String(text || '').trim();
+    try{ return JSON.parse(raw); }catch(e){}
+    const match = raw.match(/\{[\s\S]*\}/);
+    if(match){
+      try{ return JSON.parse(match[0]); }catch(e){}
+    }
+    return null;
+  }
+
+  function normalizeAiDecision(raw){
+    if(!raw || typeof raw !== 'object') return null;
+    const allowed = ['APPROVE','WAIT','BLOCK','LATE'];
+    const finalDecision = allowed.includes(String(raw.finalDecision || '').toUpperCase())
+      ? String(raw.finalDecision).toUpperCase()
+      : 'WAIT';
+    return {
+      finalDecision,
+      bestDirection:String(raw.bestDirection || 'WAIT').toUpperCase(),
+      longProbability:clampNumber(Number(raw.longProbability) || 0, 0, 100),
+      shortProbability:clampNumber(Number(raw.shortProbability) || 0, 0, 100),
+      waitProbability:clampNumber(Number(raw.waitProbability) || 0, 0, 100),
+      entryTiming:String(raw.entryTiming || 'NO_TRADE').toUpperCase(),
+      isLate:raw.isLate === true || raw.isLate === 'true',
+      nextTrigger:String(raw.nextTrigger || 'Wait for cleaner confirmation.'),
+      entryZone:Array.isArray(raw.entryZone) ? raw.entryZone.slice(0, 2).map(Number).filter(Number.isFinite) : null,
+      invalidation:Number.isFinite(Number(raw.invalidation)) ? Number(raw.invalidation) : null,
+      confidence:clampNumber(Number(raw.confidence) || 0, 0, 100),
+      reasonCodes:Array.isArray(raw.reasonCodes) ? raw.reasonCodes.map(String).slice(0, 8) : []
+    };
+  }
+
+  async function requestOllamaAiDecision(decision){
+    if(!settings.aiEnabled || !decision) return;
+    const signature = decisionSignature(decision);
+    if(aiDecisionCache[signature] || aiDecisionInFlight[signature]) return;
+    aiDecisionInFlight[signature] = true;
+    const facts = buildAiDecisionFacts(decision);
+    const prompt = [
+      'You are GoldPilot AI decision engine. You are not a chat assistant.',
+      'Use only the JSON facts. Do not invent prices. Return strict JSON only.',
+      'Your job: detect early opportunity, late entry risk, trap risk, and final trade decision.',
+      'Never approve if trade is late, directly into liquidity, below master threshold, or risk is invalid.',
+      'APPROVE only when facts support entry now. Otherwise WAIT, BLOCK, or LATE.',
+      JSON.stringify(facts)
+    ].join('\\n');
+    try{
+      const res = await fetch(settings.aiEndpoint, {
+        method:'POST',
+        headers:{'content-type':'application/json'},
+        body:JSON.stringify({
+          model:settings.aiModel,
+          stream:false,
+          format:'json',
+          messages:[
+            {role:'system', content:'Return strict JSON only. No markdown. No extra text.'},
+            {role:'user', content:prompt}
+          ]
+        })
+      });
+      if(!res.ok) throw new Error(`Ollama ${res.status}`);
+      const data = await res.json();
+      const rawText = data && data.message ? data.message.content : data.response || '';
+      const parsed = normalizeAiDecision(extractJsonObject(rawText));
+      if(parsed){
+        aiDecisionCache[signature] = parsed;
+        if(lastDecision && decisionSignature(lastDecision) === signature){
+          lastDecision.aiDecision = parsed;
+          renderDashboard(lastDecision);
+        }
+      }
+    } catch(err){
+      aiDecisionCache[signature] = {
+        finalDecision:'WAIT',
+        bestDirection:'WAIT',
+        longProbability:0,
+        shortProbability:0,
+        waitProbability:100,
+        entryTiming:'NO_TRADE',
+        isLate:false,
+        nextTrigger:`Ollama unavailable: ${err.message}`,
+        entryZone:null,
+        invalidation:null,
+        confidence:0,
+        reasonCodes:['ollama_unavailable']
+      };
+      console.warn('Ollama AI decision failed', err);
+    } finally {
+      delete aiDecisionInFlight[signature];
+    }
   }
 
   function bestSetupCandidate(decision){
@@ -1144,9 +1314,13 @@
   }
 
   function renderDashboard(decision){
+    const signature = decisionSignature(decision);
+    if(settings.aiEnabled && aiDecisionCache[signature]) decision.aiDecision = aiDecisionCache[signature];
     const freshCommit = commitDecision(decision);
     const activeCommit = freshCommit || loadActiveCommittedSignal();
     decision = applyCommittedSignal(decision, activeCommit);
+    if(settings.aiEnabled && aiDecisionCache[signature]) decision.aiDecision = aiDecisionCache[signature];
+    if(settings.aiEnabled) requestOllamaAiDecision(decision);
     lastDecision = decision;
     renderHero(decision);
     renderChart(candlesByTimeframe[activeTimeframe] || candlesByTimeframe['15M'] || []);
@@ -1226,10 +1400,17 @@
     }
     const advisor = decision.aiAdvisor;
     if(advisor){
+      const ai = decision.aiDecision;
+      const aiLine = ai
+        ? `<br><span style="color:var(--gold)">AI Decision:</span> ${escapeHtml(ai.finalDecision)} ${escapeHtml(ai.bestDirection)} | L ${fmt(ai.longProbability,0)} / S ${fmt(ai.shortProbability,0)} / W ${fmt(ai.waitProbability,0)} | ${escapeHtml(ai.entryTiming)}`
+        : settings.aiEnabled
+          ? `<br><span style="color:var(--amber)">AI Decision:</span> Waiting for Ollama structured decision...`
+          : '';
       const advisorHtml = [
         `<b>GoldPilot AI Read:</b> ${escapeHtml(advisor.summary)}`,
+        aiLine,
         `<br><span style="color:var(--text2)">Primary:</span> ${escapeHtml(advisor.primaryIdea)}.`,
-        `<br><span style="color:var(--text2)">Next:</span> ${escapeHtml((advisor.nextBestActions || [])[0] || 'Wait for a cleaner confirming candle.')}`,
+        `<br><span style="color:var(--text2)">Next:</span> ${escapeHtml(ai && ai.nextTrigger ? ai.nextTrigger : (advisor.nextBestActions || [])[0] || 'Wait for a cleaner confirming candle.')}`,
         advisor.mistakeWarning && advisor.mistakeWarning.length
           ? `<br><span style="color:var(--red)">Warning:</span> ${escapeHtml(advisor.mistakeWarning[0])}`
           : '',
@@ -1481,6 +1662,16 @@
     if(time) time.textContent = decision.tradeStatus.includes('COMMITTED') ? 'Committed' : isCommittableDecision(decision) ? `Ready ${decision.signalGrade.grade}` : 'Forming';
     if(clear) clear.style.display = decision.tradeStatus.includes('COMMITTED') ? 'inline-flex' : 'none';
     if(hint){
+      if(decision.aiDecision){
+        const ai = decision.aiDecision;
+        const aiVerdict = `AI ${ai.finalDecision} ${ai.bestDirection} (${fmt(ai.confidence, 0)}%): ${ai.nextTrigger}`;
+        if(decision.aiAdvisor){
+          hint.textContent = `${decision.aiAdvisor.primaryIdea}. ${aiVerdict} ${decision.aiAdvisor.mistakeWarning && decision.aiAdvisor.mistakeWarning[0] ? `Warning: ${decision.aiAdvisor.mistakeWarning[0]}` : ''}`;
+          return;
+        }
+        hint.textContent = aiVerdict;
+        return;
+      }
       if(decision.aiAdvisor){
         hint.textContent = `${decision.aiAdvisor.primaryIdea}. ${((decision.aiAdvisor.nextBestActions || [])[0] || decision.aiAdvisor.summary)} ${decision.aiAdvisor.mistakeWarning && decision.aiAdvisor.mistakeWarning[0] ? `Warning: ${decision.aiAdvisor.mistakeWarning[0]}` : ''}`;
         return;
