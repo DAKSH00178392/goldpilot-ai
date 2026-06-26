@@ -465,7 +465,18 @@
     };
   }
 
-  function detectSession(now){
+  function detectSession(now, context={}){
+    const account = context.account || {};
+    if(account.marketType === 'indian_index'){
+      const minutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+      const open = 3 * 60 + 45;   // 09:15 IST
+      const close = 10 * 60;      // 15:30 IST
+      if(minutes < open || minutes > close) return 'India Closed';
+      if(minutes < open + 15) return 'India Open Drive';
+      if(minutes >= 6 * 60 + 30 && minutes < 8 * 60) return 'India Midday';
+      if(minutes >= close - 45) return 'India Closing Drive';
+      return 'India Regular';
+    }
     const h = now.getUTCHours();
     if(h >= 0 && h < 7) return 'Asia';
     if(h >= 7 && h < 12) return 'London';
@@ -473,12 +484,15 @@
     return 'Rollover';
   }
 
-  function minutesUntilNews(events, now){
+  function minutesUntilNews(events, now, context={}){
     if(!events || !events.length) return null;
+    const currencies = context.account && Array.isArray(context.account.newsCurrencies)
+      ? context.account.newsCurrencies.map(c => String(c).toUpperCase())
+      : ['USD','US'];
     let best = null;
     for(const ev of events){
       if((ev.impact || '').toLowerCase() !== 'high') continue;
-      if(ev.currency && !['USD','US'].includes(String(ev.currency).toUpperCase())) continue;
+      if(ev.currency && !currencies.includes(String(ev.currency).toUpperCase())) continue;
       const t = new Date(ev.time || ev.timestamp || ev.date);
       if(isNaN(t.getTime())) continue;
       const mins = Math.round((t.getTime() - now.getTime()) / 60000);
@@ -492,32 +506,42 @@
   function evaluateTradability(candles, context){
     const reasons = [];
     const now = context.now || new Date();
-    const session = detectSession(now);
+    const session = detectSession(now, context);
     const last = candles[candles.length-1];
     const symbol = context.account && context.account.symbol ? context.account.symbol : 'symbol';
+    const marketType = context.account && context.account.marketType;
     const atr = calculateAtr(candles, 14);
     const atrPct = last && last.c ? atr / last.c : 0;
     const spread = Number(context.market.spread || 0);
-    const news = minutesUntilNews(context.newsEvents, now);
+    const maxSpreadPct = Number(context.account && context.account.maxSpreadPct != null ? context.account.maxSpreadPct : 0.00035);
+    const news = minutesUntilNews(context.newsEvents, now, context);
     let status = 'ALLOWED';
 
     if(news && news.minutes >= 0 && news.minutes <= 30){
       status = 'BLOCKED';
-      reasons.push(`High-impact USD news in ${news.minutes} minutes`);
+      reasons.push(`High-impact ${marketType === 'indian_index' ? 'India' : 'USD'} news in ${news.minutes} minutes`);
     } else if(news && news.minutes < 0){
       status = 'BLOCKED';
       reasons.push('Post-news reset window is active');
     }
 
-    if(spread && last && spread / last.c > 0.00035){
+    if(maxSpreadPct > 0 && spread && last && spread / last.c > maxSpreadPct){
       status = 'BLOCKED';
       reasons.push(`Spread is elevated for ${symbol} risk control`);
     }
-    if(session === 'Rollover'){
+    if(session === 'Rollover' || session === 'India Closed'){
       status = status === 'BLOCKED' ? status : 'WAIT';
-      reasons.push('Rollover liquidity is thin');
+      reasons.push(session === 'India Closed' ? 'Indian cash index market is closed' : 'Rollover liquidity is thin');
     }
-    if(atrPct > 0.012){
+    if(session === 'India Open Drive'){
+      status = status === 'BLOCKED' ? status : 'WAIT';
+      reasons.push('Indian index opening drive: wait for first 15-minute range and sweep/hold confirmation');
+    }
+    if(session === 'India Midday' && atrPct < 0.0012){
+      status = status === 'BLOCKED' ? status : 'WAIT';
+      reasons.push('Indian index midday compression: avoid low-volatility chop');
+    }
+    if(atrPct > (marketType === 'indian_index' ? 0.018 : 0.012)){
       status = status === 'BLOCKED' ? status : 'WAIT';
       reasons.push('Abnormal candle volatility; wait for structure to reform');
     }
@@ -713,7 +737,10 @@
 
   function buildCryptoContext(candles, context){
     const symbol = String(context.symbol || '').toUpperCase();
+    const account = context.account || {};
     const isCrypto = /USDT|BTC|ETH|BNB|SOL|DOGE|XRP|ADA|AVAX|MATIC|DOT|LINK/.test(symbol);
+    const isIndianIndex = account.marketType === 'indian_index';
+    const session = detectSession(context.now || new Date(), context);
     const last = candles[candles.length-1];
     const prev = candles[candles.length-2] || last;
     const atr = calculateAtr(candles, 14) || candleRange(last) || 0;
@@ -722,16 +749,29 @@
     const impulse = !!(isCrypto && atr && range > atr * 1.8 && body / (range || 1) > 0.55);
     const wickSweep = !!(isCrypto && atr && (last.h - Math.max(last.o,last.c) > atr * 0.75 || Math.min(last.o,last.c) - last.l > atr * 0.75));
     const oneCandleChase = !!(isCrypto && prev && Math.abs(last.c - prev.c) / (prev.c || 1) > 0.018);
+    const indexGapRisk = !!(isIndianIndex && prev && Math.abs(last.o - prev.c) / (prev.c || 1) > 0.004);
+    const indexOpeningRisk = !!(isIndianIndex && session === 'India Open Drive');
+    const indexMiddayChop = !!(isIndianIndex && session === 'India Midday' && atr && range < atr * 0.75);
+    const indexExpiryStyleRisk = !!(isIndianIndex && range > atr * 1.6 && candleBody(last) / (range || 1) < 0.35);
     const warnings = [];
     if(impulse) warnings.push('Crypto impulse candle detected; wait for retest instead of chasing');
     if(wickSweep) warnings.push('Large wick suggests liquidation sweep risk');
     if(oneCandleChase) warnings.push('Large one-candle move; entry needs pullback confirmation');
+    if(indexGapRisk) warnings.push('Indian index gap risk: wait for gap hold/fill decision before entry');
+    if(indexOpeningRisk) warnings.push('Opening drive active; wait for first range and sweep/hold confirmation');
+    if(indexMiddayChop) warnings.push('Midday index chop risk; require clean liquidity sweep or volume expansion');
+    if(indexExpiryStyleRisk) warnings.push('Wide wick index candle; avoid option-style whipsaw entries');
     return {
       isCrypto,
+      isIndianIndex,
       impulse,
       wickSweep,
       oneCandleChase,
-      chaseRisk:impulse || oneCandleChase,
+      indexGapRisk,
+      indexOpeningRisk,
+      indexMiddayChop,
+      indexExpiryStyleRisk,
+      chaseRisk:impulse || oneCandleChase || indexGapRisk || indexOpeningRisk || indexMiddayChop || indexExpiryStyleRisk,
       warnings
     };
   }
@@ -824,6 +864,40 @@
   function buildSessionRules(tradability, regime, volumeContext, candleBehavior){
     const session = tradability.session;
     const rules = {session, longOk:true, shortOk:true, continuationOk:true, sweepOk:true, reasons:[]};
+    if(session === 'India Closed'){
+      rules.longOk = false;
+      rules.shortOk = false;
+      rules.continuationOk = false;
+      rules.sweepOk = false;
+      rules.reasons.push('India session closed: block new index setups');
+      return rules;
+    }
+    if(session === 'India Open Drive'){
+      rules.continuationOk = false;
+      rules.reasons.push('Indian index open: mark first range, then trade sweep/hold only');
+    }
+    if(session === 'India Midday'){
+      rules.continuationOk = false;
+      rules.reasons.push('Indian index midday: avoid chop; require liquidity sweep or volume expansion');
+      if(volumeContext && volumeContext.score < 55){
+        rules.sweepOk = false;
+        rules.reasons.push('Midday index setup lacks volume confirmation');
+      }
+    }
+    if(session === 'India Regular'){
+      rules.reasons.push('Indian index regular session: continuation needs retest plus volume confirmation');
+      if(volumeContext && !volumeContext.confirmsBreakout && regime.regime === 'Breakout continuation mode'){
+        rules.continuationOk = false;
+        rules.reasons.push('Index breakout lacks volume expansion');
+      }
+    }
+    if(session === 'India Closing Drive'){
+      rules.reasons.push('Indian index closing drive: continuation allowed only with clean structure and strong candle quality');
+      if(candleBehavior && candleBehavior.breakoutQuality !== 'strong'){
+        rules.continuationOk = false;
+        rules.reasons.push('Closing-drive index trade needs strong candle quality');
+      }
+    }
     if(session === 'Asia'){
       rules.continuationOk = false;
       rules.reasons.push('Asia session: prefer range/sweep setups; block breakout chase');
@@ -1554,7 +1628,7 @@
     if(risk && !risk.allowed) hardReasons.push('Risk engine blocked');
     if(setup && setup.locationOk === false) hardReasons.push('Bad premium/discount location');
     if(setup && setup.htfOk === false) hardReasons.push('HTF zone conflict');
-    if(setup && setup.cryptoOk === false) hardReasons.push('Crypto chase risk');
+    if(setup && setup.cryptoOk === false) hardReasons.push(cryptoContext && cryptoContext.isIndianIndex ? 'Indian index timing/whipsaw risk' : 'Crypto chase risk');
     if(setup && setup.liquidityPathOk === false) hardReasons.push('Nearby liquidity blocks trade path');
     if(setup && setup.deltaOk === false) hardReasons.push('Volume-delta trap candle');
     if(setup && setup.wickRejectionOk === false) hardReasons.push('Weak sweep rejection wick ratio');

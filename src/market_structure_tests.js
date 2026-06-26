@@ -200,7 +200,7 @@ ok(connectorJs.includes('updateChartHover'), 'dashboard chart shows hover price/
 ok(connectorJs.includes('priceFromY'), 'hover price is calculated from dynamic chart scale');
 ok(dashboardHtml.includes('chart-tooltip'), 'chart has hover OHLC tooltip layer');
 ok(connectorJs.includes('fmtPrice'), 'dashboard renders low-priced crypto levels with dynamic precision');
-ok(connectorJs.includes('Binance ${CONFIG.symbol}'), 'dashboard market data label follows focused symbol');
+ok(connectorJs.includes("profileForSymbol(CONFIG.symbol).dataSource === 'yahoo'") && connectorJs.includes('Yahoo'), 'dashboard market data label follows focused symbol and source');
 ok(connectorJs.includes('confirmedCandles'), 'dashboard sends only closed Binance candles to the decision engine');
 ok(connectorJs.includes('goldpilotCommittedSignals'), 'dashboard persists committed confirmed signals');
 ok(connectorJs.includes('applyCommittedSignal'), 'dashboard keeps committed signals visible after refresh');

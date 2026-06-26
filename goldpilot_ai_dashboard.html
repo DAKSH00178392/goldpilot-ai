@@ -4,7 +4,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>GoldPilot AI - XAUUSD Intelligence Dashboard</title>
+<title>GoldPilot AI - Multi-Market Intelligence Dashboard</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap');
@@ -417,7 +417,7 @@ svg.chart{width:100%;height:100%}
       <div class="logo-icon">G</div>
       <div>
         <div class="logo-text">GoldPilot AI</div>
-        <div class="logo-sub">XAUUSD Intelligence</div>
+        <div class="logo-sub">Multi-Market Intelligence</div>
       </div>
     </div>
     <div class="nav-pills">
@@ -436,6 +436,9 @@ svg.chart{width:100%;height:100%}
       <label for="primary-symbol">Symbol</label>
       <select id="primary-symbol">
         <option value="PAXGUSDT">PAXGUSDT</option>
+        <option value="^NSEI">NIFTY 50</option>
+        <option value="^NSEBANK">BANK NIFTY</option>
+        <option value="^BSESN">SENSEX</option>
         <option value="BTCUSDT">BTCUSDT</option>
         <option value="ETHUSDT">ETHUSDT</option>
         <option value="SOLUSDT">SOLUSDT</option>
@@ -461,7 +464,7 @@ svg.chart{width:100%;height:100%}
             <div class="regime-badge"><i class="ti ti-trending-up" aria-hidden="true" style="font-size:12px"></i> Bullish pullback mode</div>
           </div>
           <div class="price-display">
-            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;font-family:'DM Mono',monospace;margin-bottom:3px">XAUUSD</div>
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;font-family:'DM Mono',monospace;margin-bottom:3px">PAXGUSDT gold proxy</div>
             <div class="price-num" id="live-price">2,347.80</div>
             <div class="price-change" id="live-chg">▲ +0.34% today</div>
           </div>
@@ -775,8 +778,8 @@ svg.chart{width:100%;height:100%}
       </div>
 
       <div class="panel">
-        <div class="panel-title"><i class="ti ti-radar" aria-hidden="true"></i>Crypto Watchlist Alerts</div>
-        <div id="watchlist-alerts" class="watch-alert">Scanning configured Binance symbols.</div>
+        <div class="panel-title"><i class="ti ti-radar" aria-hidden="true"></i>Market Watchlist Alerts</div>
+        <div id="watchlist-alerts" class="watch-alert">Scanning configured markets.</div>
         <div id="crypto-watchlist">
           <div class="watchlist-row">
             <div class="watch-symbol">-</div>

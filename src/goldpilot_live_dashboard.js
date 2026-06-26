@@ -28,9 +28,71 @@
     ['D', '1d']
   ];
   const WATCHLIST_SYMBOLS = [
+    '^NSEI','^NSEBANK','^BSESN',
     'PAXGUSDT','BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT',
     'ADAUSDT','DOGEUSDT','LINKUSDT','AVAXUSDT','MATICUSDT','DOTUSDT'
   ];
+  const MARKET_PROFILES = {
+    'PAXGUSDT': {
+      symbol:'PAXGUSDT',
+      displayName:'PAXGUSDT gold proxy',
+      dataSource:'binance',
+      marketType:'crypto_gold_proxy',
+      sizingMode:'BINANCE_SPOT_QUANTITY',
+      minLot:0.01,
+      tickValuePerLot:1
+    },
+    '^NSEI': {
+      symbol:'^NSEI',
+      displayName:'NIFTY 50 index',
+      dataSource:'yahoo',
+      yahooSymbol:'^NSEI',
+      marketType:'indian_index',
+      exchange:'NSE',
+      indexName:'NIFTY 50',
+      sizingMode:'INDEX_POINT_QUANTITY',
+      minLot:1,
+      tickValuePerLot:1,
+      maxSpreadPct:0,
+      newsCurrencies:['INR','IN','INDIA']
+    },
+    '^NSEBANK': {
+      symbol:'^NSEBANK',
+      displayName:'BANK NIFTY index',
+      dataSource:'yahoo',
+      yahooSymbol:'^NSEBANK',
+      marketType:'indian_index',
+      exchange:'NSE',
+      indexName:'BANK NIFTY',
+      sizingMode:'INDEX_POINT_QUANTITY',
+      minLot:1,
+      tickValuePerLot:1,
+      maxSpreadPct:0,
+      newsCurrencies:['INR','IN','INDIA']
+    },
+    '^BSESN': {
+      symbol:'^BSESN',
+      displayName:'SENSEX index',
+      dataSource:'yahoo',
+      yahooSymbol:'^BSESN',
+      marketType:'indian_index',
+      exchange:'BSE',
+      indexName:'SENSEX',
+      sizingMode:'INDEX_POINT_QUANTITY',
+      minLot:1,
+      tickValuePerLot:1,
+      maxSpreadPct:0,
+      newsCurrencies:['INR','IN','INDIA']
+    }
+  };
+  const YAHOO_INTERVALS = {
+    '1m': {interval:'1m', range:'1d'},
+    '5m': {interval:'5m', range:'5d'},
+    '15m': {interval:'15m', range:'5d'},
+    '1h': {interval:'60m', range:'1mo'},
+    '4h': {interval:'60m', range:'3mo', aggregate:4},
+    '1d': {interval:'1d', range:'1y'}
+  };
 
   let candlesByTimeframe = {};
   let latestTicker = null;
@@ -151,8 +213,22 @@
     return 'var(--amber)';
   }
 
+  function profileForSymbol(symbol=CONFIG.symbol){
+    const normalized = String(symbol || '').toUpperCase().trim();
+    return MARKET_PROFILES[normalized] || {
+      symbol:normalized,
+      displayName:normalized,
+      dataSource:'binance',
+      marketType:/USDT|BTC|ETH|BNB|SOL|DOGE|XRP|ADA|AVAX|MATIC|DOT|LINK/.test(normalized) ? 'crypto' : 'market',
+      sizingMode:'BINANCE_SPOT_QUANTITY',
+      minLot:0.01,
+      tickValuePerLot:1
+    };
+  }
+
   function displayNameForSymbol(symbol){
-    if(symbol === 'PAXGUSDT') return 'PAXGUSDT gold proxy';
+    const profile = profileForSymbol(symbol);
+    if(profile.displayName) return profile.displayName;
     if(symbol === 'BTCUSDT') return 'BTCUSDT bitcoin';
     if(symbol === 'ETHUSDT') return 'ETHUSDT ethereum';
     if(symbol === 'SOLUSDT') return 'SOLUSDT solana';
@@ -187,10 +263,17 @@
   }
 
   function accountForSymbol(symbol=CONFIG.symbol, overrides={}){
+    const profile = profileForSymbol(symbol);
     return Object.assign({}, settings, overrides, {
       symbol,
-      sizingMode:'BINANCE_SPOT_QUANTITY',
-      tickValuePerLot:1
+      marketType:profile.marketType,
+      exchange:profile.exchange || null,
+      indexName:profile.indexName || null,
+      sizingMode:profile.sizingMode || 'BINANCE_SPOT_QUANTITY',
+      minLot:profile.minLot || settings.minLot,
+      tickValuePerLot:profile.tickValuePerLot || 1,
+      maxSpreadPct:profile.maxSpreadPct,
+      newsCurrencies:profile.newsCurrencies
     });
   }
 
@@ -460,6 +543,12 @@
     if(normalized === CONFIG.symbol){
       const current = currentMarketPrice();
       if(current != null) return current;
+    }
+    const profile = profileForSymbol(normalized);
+    if(profile.dataSource === 'yahoo'){
+      const rows = await fetchYahooKlines('1d', 5, normalized);
+      const last = rows[rows.length - 1];
+      return last ? Number(last.c) : null;
     }
     const ticker = await fetchJson(`https://api.binance.com/api/v3/ticker/price?symbol=${normalized}`);
     return Number(ticker.price);
@@ -1028,7 +1117,41 @@
     }
   }
 
-  async function fetchKlines(interval, limit=CONFIG.candlesLimit, symbol=CONFIG.symbol){
+  function normalizeYahooChart(result, aggregate=1){
+    const chart = result && result.chart && result.chart.result && result.chart.result[0];
+    if(!chart || !chart.timestamp || !chart.indicators || !chart.indicators.quote) throw new Error('Yahoo chart returned no candles');
+    const quote = chart.indicators.quote[0] || {};
+    const timestamps = chart.timestamp || [];
+    const rows = timestamps.map((ts, i) => ({
+      t: ts * 1000,
+      o: Number(quote.open && quote.open[i]),
+      h: Number(quote.high && quote.high[i]),
+      l: Number(quote.low && quote.low[i]),
+      c: Number(quote.close && quote.close[i]),
+      v: Number(quote.volume && quote.volume[i] || 0),
+      x: ts * 1000,
+      isClosed:true
+    })).filter(c => [c.o,c.h,c.l,c.c].every(Number.isFinite));
+    if(aggregate <= 1) return rows;
+    const grouped = [];
+    for(let i=0;i<rows.length;i+=aggregate){
+      const chunk = rows.slice(i, i + aggregate);
+      if(chunk.length < aggregate) continue;
+      grouped.push({
+        t:chunk[0].t,
+        o:chunk[0].o,
+        h:Math.max(...chunk.map(c => c.h)),
+        l:Math.min(...chunk.map(c => c.l)),
+        c:chunk[chunk.length - 1].c,
+        v:chunk.reduce((sum, c) => sum + (c.v || 0), 0),
+        x:chunk[chunk.length - 1].x,
+        isClosed:true
+      });
+    }
+    return grouped;
+  }
+
+  async function fetchBinanceKlines(interval, limit=CONFIG.candlesLimit, symbol=CONFIG.symbol){
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     const rows = await fetchJson(url);
     const now = Date.now();
@@ -1044,11 +1167,26 @@
     }));
   }
 
+  async function fetchYahooKlines(interval, limit=CONFIG.candlesLimit, symbol=CONFIG.symbol){
+    const profile = profileForSymbol(symbol);
+    const cfg = YAHOO_INTERVALS[interval] || YAHOO_INTERVALS['15m'];
+    const yahooSymbol = encodeURIComponent(profile.yahooSymbol || symbol);
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=${cfg.interval}&range=${cfg.range}&includePrePost=false`;
+    const rows = normalizeYahooChart(await fetchJson(url), cfg.aggregate || 1);
+    return rows.slice(-limit);
+  }
+
+  async function fetchKlines(interval, limit=CONFIG.candlesLimit, symbol=CONFIG.symbol){
+    const profile = profileForSymbol(symbol);
+    if(profile.dataSource === 'yahoo') return fetchYahooKlines(interval, limit, symbol);
+    return fetchBinanceKlines(interval, limit, symbol);
+  }
+
   function confirmedCandles(candles){
     return (candles || []).filter(c => c && c.isClosed !== false);
   }
 
-  async function fetchTicker(){
+  async function fetchBinanceTicker(){
     const [ticker, book] = await Promise.all([
       fetchJson(`https://api.binance.com/api/v3/ticker/24hr?symbol=${CONFIG.symbol}`),
       fetchJson(`https://api.binance.com/api/v3/ticker/bookTicker?symbol=${CONFIG.symbol}`)
@@ -1060,6 +1198,44 @@
       bid: Number(book.bidPrice),
       ask: Number(book.askPrice),
       spread: Number(book.askPrice) - Number(book.bidPrice)
+    };
+  }
+
+  async function fetchYahooTicker(){
+    const profile = profileForSymbol(CONFIG.symbol);
+    const rows = await fetchYahooKlines('1d', 5, CONFIG.symbol);
+    const last = rows[rows.length - 1];
+    const prev = rows[rows.length - 2];
+    if(!last) throw new Error(`${profile.displayName} ticker unavailable`);
+    const changePct = prev && prev.c ? ((last.c - prev.c) / prev.c) * 100 : 0;
+    return {
+      last:last.c,
+      changePct,
+      volume:last.v || 0,
+      bid:last.c,
+      ask:last.c,
+      spread:0
+    };
+  }
+
+  async function fetchTicker(){
+    const profile = profileForSymbol(CONFIG.symbol);
+    if(profile.dataSource === 'yahoo') return fetchYahooTicker();
+    return fetchBinanceTicker();
+  }
+
+  function tickerFromCandles(candles){
+    const rows = confirmedCandles(candles || []);
+    const last = rows[rows.length - 1];
+    const prev = rows[rows.length - 2];
+    if(!last) return null;
+    return {
+      last:last.c,
+      changePct:prev && prev.c ? ((last.c - prev.c) / prev.c) * 100 : 0,
+      volume:last.v || 0,
+      bid:last.c,
+      ask:last.c,
+      spread:0
     };
   }
 
@@ -1146,7 +1322,11 @@
   async function refreshLiveNews(force=false){
     const now = Date.now();
     if(!force && liveNewsEvents.length && now - liveNewsFetchedAt < 10 * 60000) return liveNewsEvents;
-    const query = encodeURIComponent('("gold price" OR "spot gold" OR "gold futures" OR xauusd OR bitcoin OR ethereum OR crypto OR binance OR "federal reserve" OR "us dollar" OR "treasury yields" OR inflation OR cpi OR fomc)');
+    const profile = profileForSymbol(CONFIG.symbol);
+    const indiaTerms = profile.marketType === 'indian_index'
+      ? ' OR nifty OR "bank nifty" OR sensex OR nse OR bse OR "reserve bank of india" OR rbi OR "india cpi"'
+      : '';
+    const query = encodeURIComponent(`("gold price" OR "spot gold" OR "gold futures" OR xauusd OR bitcoin OR ethereum OR crypto OR binance OR "federal reserve" OR "us dollar" OR "treasury yields" OR inflation OR cpi OR fomc${indiaTerms})`);
     const gdeltUrl = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=ArtList&format=json&maxrecords=20&timespan=48h&sort=DateDesc`;
     const binanceUrl = 'https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageNo=1&pageSize=8';
     const results = await Promise.allSettled([fetchJson(gdeltUrl), fetchJson(binanceUrl)]);
@@ -1182,23 +1362,30 @@
         maxTradesHit: getJournalStats().tradesToday >= settings.maxTradesPerDay
       }),
       market: {spread: latestTicker ? latestTicker.spread : 0},
+      symbol: CONFIG.symbol,
       newsEvents: loadManualNewsEvents()
     });
   }
 
   async function refreshMarketData(){
     setConnection('CONNECTING', 'var(--amber)');
+    const profile = profileForSymbol(CONFIG.symbol);
     const timeframeLoads = TIMEFRAMES.map(async ([label, interval]) => {
       candlesByTimeframe[label] = await fetchKlines(interval);
     });
     await Promise.all([
       ...timeframeLoads,
-      fetchTicker().then(t => { latestTicker = t; }),
+      profile.dataSource === 'yahoo'
+        ? Promise.resolve()
+        : fetchTicker().then(t => { latestTicker = t; }),
       refreshLiveNews().catch(err => {
         console.warn('live news unavailable', err);
         newsSourceStatus = liveNewsEvents.length ? 'Cached' : 'Manual';
       })
     ]);
+    if(profile.dataSource === 'yahoo'){
+      latestTicker = tickerFromCandles(candlesByTimeframe['15M']) || tickerFromCandles(candlesByTimeframe['D']);
+    }
     await updateDemoTrades();
     const decision = buildDecision();
     renderDashboard(decision);
@@ -1242,7 +1429,7 @@
     if(!picker || Array.from(picker.options).some(opt => opt.value === symbol)) return;
     const option = document.createElement('option');
     option.value = symbol;
-    option.textContent = symbol;
+    option.textContent = displayNameForSymbol(symbol);
     picker.appendChild(option);
   }
 
@@ -1279,6 +1466,7 @@
         timeframes:{'15M':confirmedM15,'1H':confirmedH1,'4H':confirmedH4,'D':confirmedD1},
         account:accountForSymbol(symbol),
         market:{spread:0},
+        symbol,
         newsEvents:loadManualNewsEvents()
       });
       const preferredCandidate = decision.preferredDirection === 'LONG'
@@ -1771,7 +1959,10 @@
     if(rows[5]) rows[5].textContent = `${stats.tradesToday} / ${settings.maxTradesPerDay}`;
     const status = qs('#risk-panel')?.querySelector('div[style*="font-size:12px"]');
     if(status){
-      status.textContent = risk.allowed ? 'Permitted by Binance spot quantity risk engine' : (risk.reasons || ['No actionable trade plan'])[0];
+      const profile = profileForSymbol(CONFIG.symbol);
+      status.textContent = risk.allowed
+        ? `Permitted by ${profile.marketType === 'indian_index' ? 'Indian index point-quantity' : 'Binance spot quantity'} risk engine`
+        : (risk.reasons || ['No actionable trade plan'])[0];
       status.style.color = risk.allowed ? 'var(--green)' : 'var(--amber)';
     }
   }
@@ -1836,7 +2027,7 @@
       {ok: !htf || candidate.htfOk !== false, label: htf ? `HTF zones: ${htf.summary}` : 'HTF zone alignment'},
       {ok: !volume || volume.score >= 50, label: volume ? `Volume: ${volume.state} (${volume.ratio}x)` : 'Volume confirmation'},
       {ok: !trend || trend.score >= 45, label: trend ? `Trend quality: ${trend.quality} ${trend.score}%` : 'Trend quality'},
-      {ok: !crypto || !crypto.chaseRisk, label: crypto && crypto.isCrypto ? 'Crypto chase/liquidation risk' : 'Crypto risk clear'},
+      {ok: !crypto || !crypto.chaseRisk, label: crypto && crypto.isCrypto ? 'Crypto chase/liquidation risk' : crypto && crypto.isIndianIndex ? 'India index opening/expiry risk clear' : 'Market-specific risk clear'},
       {ok: !!(setup && setup.direction), label: setup && setup.setup ? setup.setup : 'Valid setup detected'},
       {ok: decision.preferredDirection !== 'NONE', label: `Preferred direction: ${decision.preferredDirection || 'NONE'}`},
       {ok: !!decision.nextStepForecast, label: decision.nextStepForecast ? `Next step: ${decision.nextStepForecast.leadDirection} ${decision.nextStepForecast.confidence}%` : 'Next-step read'},
@@ -1885,7 +2076,7 @@
         ? `<b>${alerts.length} confirmed setup${alerts.length > 1 ? 's' : ''}:</b>${alerts.map(a =>
             `<button type="button" data-symbol="${escapeHtml(a.symbol)}">${escapeHtml(a.symbol)} ${escapeHtml(a.grade || '')} ${escapeHtml(a.side || '')} entry ${fmtPrice(a.entry)} | SL ${fmtPrice(a.stopLoss)} | TP1 ${fmtPrice(a.tp1)}</button>`
           ).join('')}<div style="margin-top:6px">${escapeHtml(watchlistCommitSummary(rows))}</div>`
-        : `Scanning ${loadWatchlistSymbols().length} configured Binance symbols. No confirmed trade right now.<div style="margin-top:6px">${escapeHtml(watchlistCommitSummary(rows))}</div>`;
+        : `Scanning ${loadWatchlistSymbols().length} configured markets. No confirmed trade right now.<div style="margin-top:6px">${escapeHtml(watchlistCommitSummary(rows))}</div>`;
     }
   }
 
@@ -1966,7 +2157,7 @@
     const statValues = qsa('.stat-pill span');
     if(statValues[0]) statValues[0].textContent = fmt(decision.tradability.spread, 2);
     if(statValues[1]) statValues[1].textContent = fmt(decision.tradability.atr, 2);
-    if(statValues[2]) statValues[2].textContent = `Binance ${CONFIG.symbol}`;
+    if(statValues[2]) statValues[2].textContent = `${profileForSymbol(CONFIG.symbol).dataSource === 'yahoo' ? 'Yahoo' : 'Binance'} ${CONFIG.symbol}`;
     if(statValues[3]) statValues[3].textContent = newsSourceStatus;
   }
 
