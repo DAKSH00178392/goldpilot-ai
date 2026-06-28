@@ -137,6 +137,14 @@
     const n = Number(value);
     return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
   }
+  function candleChangePct(candles){
+    const rows = confirmedCandles(candles || []);
+    if(rows.length < 2) return null;
+    const last = rows[rows.length - 1];
+    const prev = rows[rows.length - 2];
+    if(!prev || !prev.c || !last || !isFinite(last.c)) return null;
+    return (last.c - prev.c) / prev.c * 100;
+  }
   function setText(selector, text){
     const el = qs(selector);
     if(el) el.textContent = text;
@@ -1491,11 +1499,13 @@
         decision.shortSetup ? decision.shortSetup.entryReadinessScore || 0 : 0,
         decision.preferredDirection === 'NONE' && decision.nextStepForecast ? Math.min(45, decision.nextStepForecast.confidence || 0) : 0
       );
+      const marketChangePct = candleChangePct(confirmedD1) ?? candleChangePct(confirmedM15);
       return {
         symbol,
         status:decision.tradeStatus,
         stage:decision.setupStage,
         score:monitorScore,
+        marketChangePct,
         bias:decision.bias ? decision.bias.bias : '-',
         setup,
         side:plan ? plan.side : decision.preferredDirection,
@@ -1505,6 +1515,7 @@
         riskReward:plan ? plan.riskReward : null,
         grade:decision.signalGrade ? decision.signalGrade.grade : '-',
         committable:decision.signalGrade ? decision.signalGrade.committable : false,
+        brain:decision.marketBrain || null,
         plan,
         risk:decision.risk,
         setupObj:decision.setup,
@@ -1514,7 +1525,7 @@
         reason:[...(decision.missingConditions || []), ...(decision.nextConditionNeeded || []), ...(decision.reason || [])].slice(0,2).join(' ')
       };
     } catch(err){
-      return {symbol, status:'DATA ERROR', stage:'ERROR', score:0, bias:'-', setup:err.message, ready:false, blocked:true};
+      return {symbol, status:'DATA ERROR', stage:'ERROR', score:0, marketChangePct:null, bias:'-', setup:err.message, ready:false, blocked:true};
     }
   }
 
@@ -1540,6 +1551,7 @@
     if(settings.aiEnabled) requestOllamaAiDecision(decision);
     lastDecision = decision;
     renderHero(decision);
+    renderMarketBrain(decision);
     renderChart(candlesByTimeframe[activeTimeframe] || candlesByTimeframe['15M'] || []);
     renderBias(decision);
     renderRegime(decision);
@@ -1641,6 +1653,49 @@
         ? `<b>${decision.tradeStatus}.</b> ${reasons.map(escapeHtml).join(' ')}`
         : '<b>WAIT.</b> No engine reason returned yet.');
     }
+  }
+
+  function renderMarketBrain(decision){
+    const brain = decision.marketBrain || {};
+    const action = qs('#brain-action');
+    const final = qs('#brain-final');
+    const playbook = qs('#brain-playbook');
+    const confidence = qs('#brain-confidence');
+    const fill = qs('#brain-confidence-fill');
+    const situation = qs('#brain-situation');
+    const discipline = qs('#brain-discipline');
+    const past = qs('#brain-past');
+    const library = qs('#brain-library');
+    const next = qs('#brain-next');
+    const warning = qs('#brain-warning');
+    const actionText = brain.action || 'WAIT';
+    const actionColor = actionText === 'DEMO_READY' ? 'var(--green)'
+      : actionText === 'BLOCK' ? 'var(--red)'
+        : actionText === 'ALERT' ? 'var(--gold-light)' : 'var(--cyan)';
+    if(action){
+      action.textContent = actionText.replace('_', ' ');
+      action.style.color = actionColor;
+      action.style.borderColor = actionColor;
+    }
+    if(final) final.textContent = brain.finalDecision || 'Wait';
+    if(playbook) playbook.textContent = `${brain.playbook || 'No playbook'} | ${brain.autonomy || 'Observation mode'}`;
+    if(confidence) confidence.textContent = `Confidence ${fmt(brain.confidence || 0, 0)}%`;
+    if(fill) fill.style.width = `${Math.max(0, Math.min(100, Number(brain.confidence || 0)))}%`;
+    if(situation) situation.textContent = brain.situation ? `${brain.situation.label} | ${(brain.situation.reasons || [])[0] || 'No dominant situation reason'}` : '-';
+    if(discipline){
+      const philosophy = brain.philosophy || {};
+      const execution = brain.executionQuality || {};
+      discipline.textContent = `${execution.label || 'WAIT'} ${fmt(execution.score || 0, 0)} | ${philosophy.summary || 'No discipline warning'}`;
+    }
+    if(past) past.textContent = brain.marketState || '-';
+    if(library){
+      const rankings = brain.playbookRankings || [];
+      library.textContent = rankings.length
+        ? rankings.slice(0, 3).map(p => `${p.name} ${fmt(p.score, 0)}`).join(' | ')
+        : brain.playbook || '-';
+    }
+    if(next) next.textContent = brain.nextTrigger || '-';
+    if(warning) warning.textContent = brain.warnings && brain.warnings.length ? brain.warnings[0] : (brain.evidence && brain.evidence[0]) || 'No major warning';
   }
 
   function renderChart(candles){
@@ -2059,14 +2114,15 @@
     }
     wrap.innerHTML = rows.map(row => {
       const scoreClass = row.ready ? 'ready' : row.blocked ? 'blocked' : 'wait';
+      const moveText = row.marketChangePct == null ? 'Move -' : `Move ${pct(row.marketChangePct)}`;
       const detail = row.entry
-        ? `${row.grade || '-'} ${row.side || ''} entry ${fmtPrice(row.entry)} | SL ${fmtPrice(row.stopLoss)} | TP1 ${fmtPrice(row.tp1)} | R:R ${row.riskReward ? `1:${fmt(row.riskReward,2)}` : '-'}`
-        : `${row.bias} | ${row.setup || row.reason || row.stage}`;
+        ? `${moveText} | ${row.grade || '-'} ${row.side || ''} entry ${fmtPrice(row.entry)} | SL ${fmtPrice(row.stopLoss)} | TP1 ${fmtPrice(row.tp1)} | R:R ${row.riskReward ? `1:${fmt(row.riskReward,2)}` : '-'}`
+        : `${moveText} | ${row.bias} | ${row.setup || row.reason || row.stage}`;
       const age = row.scannedAt ? `scan ${formatAge(row.scannedAt)} ago` : 'scan age -';
       return `<div class="watchlist-row" data-symbol="${escapeHtml(row.symbol)}" title="Open ${escapeHtml(row.symbol)} chart">
         <div class="watch-symbol">${escapeHtml(row.symbol.replace('USDT',''))}</div>
         <div class="watch-status">${escapeHtml(row.status)}<br>${escapeHtml(detail)}<br><span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace">${escapeHtml(age)}</span></div>
-        <div class="watch-score ${scoreClass}">${row.score}%</div>
+        <div class="watch-score ${scoreClass}"><span style="display:block;font-size:9px;color:var(--text3)">Setup</span>${row.score}%</div>
       </div>`;
     }).join('');
     const alerts = rows.filter(r => r.ready);
@@ -2348,20 +2404,46 @@
       .replaceAll("'", '&#039;');
   }
 
+  const PAGE_META = {
+    Dashboard: {
+      heading:'Dashboard',
+      subtitle:'Live decision cockpit with chart, signal, risk, and market context'
+    },
+    Analysis: {
+      heading:'Analysis',
+      subtitle:'Bias, regime, candle behavior, liquidity, news, and checklist quality'
+    },
+    Backtests: {
+      heading:'Signals & Watchlist',
+      subtitle:'Demo auto-trades, committed setups, and scanned market opportunities'
+    },
+    Journal: {
+      heading:'Journal',
+      subtitle:'Decision snapshots, reviewed trades, and daily risk history'
+    },
+    Settings: {
+      heading:'Settings',
+      subtitle:'Risk model, AI options, and current signal control'
+    }
+  };
+
+  function setAppPage(pageName){
+    const page = PAGE_META[pageName] ? pageName : 'Dashboard';
+    document.body.dataset.page = page;
+    qsa('.pill').forEach(p => p.classList.toggle('active', p.textContent.trim() === page));
+    const heading = qs('#page-heading');
+    const subtitle = qs('#page-subtitle');
+    if(heading) heading.textContent = PAGE_META[page].heading;
+    if(subtitle) subtitle.textContent = PAGE_META[page].subtitle;
+    const anchor = page === 'Journal' ? qs('#journal-section') : qs('#dashboard-section');
+    if(anchor && window.scrollY > 80) window.scrollTo({top:0, behavior:'smooth'});
+  }
+
   function wireTabs(){
+    if(!document.body.dataset.page) setAppPage('Dashboard');
     qsa('.pill').forEach(p => {
       p.addEventListener('click', () => {
-        qsa('.pill').forEach(x => x.classList.remove('active'));
-        p.classList.add('active');
-        const targetMap = {
-          Dashboard: '#dashboard-section',
-          Analysis: '.modules',
-          Backtests: '#crypto-watchlist',
-          Journal: '#journal-section',
-          Settings: '#settings-section'
-        };
-        const target = qs(targetMap[p.textContent.trim()]);
-        if(target) target.scrollIntoView({behavior:'smooth', block:'start'});
+        setAppPage(p.textContent.trim());
       });
     });
     qsa('.tf').forEach(t => {

@@ -1777,6 +1777,462 @@
     };
   }
 
+  function pctChange(from, to){
+    if(!from || !isFinite(from) || !isFinite(to)) return 0;
+    return (to - from) / from * 100;
+  }
+
+  function buildBrainMarketMemory(candles){
+    const empty = {
+      lookback:0,
+      dayChangePct:0,
+      recentRangePct:0,
+      gapPct:0,
+      compression:false,
+      expansion:false,
+      trendPressure:'Mixed',
+      repeatedSweepCount:0,
+      summary:'Not enough past candle context'
+    };
+    if(!candles || candles.length < 8) return empty;
+    const last = candles[candles.length-1];
+    const prev = candles[candles.length-2] || last;
+    const recent = candles.slice(-30);
+    const prior = candles.slice(-80, -30);
+    const recentHighValue = recent.reduce((m,c)=>Math.max(m,c.h), -Infinity);
+    const recentLowValue = recent.reduce((m,c)=>Math.min(m,c.l), Infinity);
+    const priorHighValue = prior.length ? prior.reduce((m,c)=>Math.max(m,c.h), -Infinity) : recentHighValue;
+    const priorLowValue = prior.length ? prior.reduce((m,c)=>Math.min(m,c.l), Infinity) : recentLowValue;
+    const recentRangePct = last.c ? (recentHighValue - recentLowValue) / last.c * 100 : 0;
+    const priorRangePct = last.c && prior.length ? (priorHighValue - priorLowValue) / last.c * 100 : recentRangePct;
+    const dayChangePct = pctChange(candles[Math.max(0, candles.length - Math.min(26, candles.length))].c, last.c);
+    const gapPct = pctChange(prev.c, last.o);
+    let upCloses = 0, downCloses = 0, repeatedSweepCount = 0;
+    for(let i=Math.max(1, candles.length - 18); i<candles.length; i++){
+      if(candles[i].c > candles[i-1].c) upCloses++;
+      if(candles[i].c < candles[i-1].c) downCloses++;
+      if(candles[i].h > candles[i-1].h && candles[i].c < candles[i-1].h) repeatedSweepCount++;
+      if(candles[i].l < candles[i-1].l && candles[i].c > candles[i-1].l) repeatedSweepCount++;
+    }
+    const trendPressure = upCloses > downCloses + 3 ? 'Bullish pressure'
+      : downCloses > upCloses + 3 ? 'Bearish pressure'
+        : 'Mixed';
+    const compression = recentRangePct < priorRangePct * 0.58;
+    const expansion = recentRangePct > priorRangePct * 1.35;
+    const summary = [
+      `${trendPressure}`,
+      compression ? 'compressed range' : expansion ? 'range expansion' : 'normal range',
+      Math.abs(gapPct) > 0.35 ? `gap ${round(gapPct, 2)}%` : null,
+      repeatedSweepCount >= 3 ? `${repeatedSweepCount} recent sweep/trap candles` : null
+    ].filter(Boolean).join(' | ');
+    return {
+      lookback:recent.length,
+      dayChangePct:round(dayChangePct, 2),
+      recentRangePct:round(recentRangePct, 2),
+      gapPct:round(gapPct, 2),
+      compression,
+      expansion,
+      trendPressure,
+      repeatedSweepCount,
+      summary
+    };
+  }
+
+  const BRAIN_LIBRARY = {
+    philosophy:[
+      {id:'CAPITAL_FIRST', label:'Protect capital first', rule:'If risk, session, volatility, or news is bad, the best decision is no trade.'},
+      {id:'NO_CHASE', label:'No chase entries', rule:'If price already moved away from the decision zone, wait for retest.'},
+      {id:'CLEAR_INVALIDATION', label:'Clear invalidation required', rule:'A trade is not valid unless the invalidation point is logical and close enough for reward.'},
+      {id:'QUALITY_OVER_FREQUENCY', label:'Quality over frequency', rule:'One high-quality aligned trade is better than many average signals.'},
+      {id:'NO_TRADE_IS_DECISION', label:'No trade is a decision', rule:'Waiting is active risk control, not missing out.'},
+      {id:'CONFIRM_BEFORE_COMMIT', label:'Confirm before commit', rule:'Sweep, structure shift, retest, and risk must agree before demo commit.'}
+    ],
+    situations:[
+      {id:'TREND_DAY', label:'Trend day', trigger:'Directional bias, clean trend quality, and non-choppy range expansion.'},
+      {id:'RANGE_DAY', label:'Range day', trigger:'Neutral or mixed bias with repeated sweeps and no clean continuation.'},
+      {id:'GAP_DAY', label:'Gap day', trigger:'Opening gap is meaningful versus recent close.'},
+      {id:'TRAP_DAY', label:'Trap day', trigger:'Repeated sweep/fakeout candles dominate recent context.'},
+      {id:'NEWS_DAY', label:'News day', trigger:'Tradability blocks or warns because of high-impact event timing.'},
+      {id:'OPENING_DRIVE', label:'Opening drive', trigger:'Market is inside early session discovery.'},
+      {id:'MIDDAY_CHOP', label:'Midday chop', trigger:'Indian index midday or compressed low-volatility range.'},
+      {id:'COMPRESSION', label:'Compression', trigger:'Recent range is materially smaller than previous range.'},
+      {id:'EXPANSION', label:'Expansion', trigger:'Recent range expands beyond prior context.'}
+    ],
+    memoryHooks:[
+      'Track repeated fakeouts per symbol/day',
+      'Track which market is cleanest today',
+      'Track user mistakes from trade review notes',
+      'Demote setup after same-pattern losses',
+      'Block revenge trades after daily loss limit'
+    ]
+  };
+
+  const MARKET_PLAYBOOKS = [
+    {
+      id:'INDIA_OPEN_RANGE_SWEEP',
+      name:'India opening range sweep',
+      markets:['indian_index'],
+      applies:ctx => /India Open Drive|India Regular/.test(ctx.session),
+      score:ctx => 35
+        + (ctx.memory.repeatedSweepCount >= 2 ? 22 : 0)
+        + (ctx.formation.side ? 14 : 0)
+        + (ctx.setup && /sweep|liquidity/i.test(ctx.setup.setup || '') ? 18 : 0)
+        - (ctx.crypto && ctx.crypto.indexOpeningRisk ? 18 : 0),
+      trigger:'First 15m range must form, then trade only a sweep/hold plus CHOCH',
+      warning:'Opening traps are common; never chase the first drive candle',
+      direction:ctx => ctx.formation.side || ctx.setup.direction || ctx.forecast.leadDirection || 'NONE'
+    },
+    {
+      id:'BANKNIFTY_WHIPSAW_FILTER',
+      name:'Bank Nifty whipsaw filter',
+      symbols:['^NSEBANK'],
+      applies:ctx => true,
+      score:ctx => 24
+        + (ctx.crypto && ctx.crypto.indexExpiryStyleRisk ? 26 : 0)
+        + (ctx.memory.repeatedSweepCount >= 3 ? 18 : 0)
+        + (ctx.session === 'India Midday' ? 12 : 0),
+      trigger:'Require deeper retest, clear rejection, and wider invalidation before entry',
+      warning:'Bank Nifty can fake both sides near round numbers and option strikes',
+      direction:ctx => ctx.setup.direction || ctx.formation.side || 'NONE'
+    },
+    {
+      id:'NIFTY_STRUCTURE_CONTINUATION',
+      name:'Nifty structure continuation',
+      symbols:['^NSEI'],
+      applies:ctx => ctx.regime && /trend|continuation|Bullish|Bearish/i.test(ctx.regime.regime || ''),
+      score:ctx => 30
+        + (ctx.setup && /BOS|continuation|Demand|Supply/i.test(ctx.setup.setup || '') ? 22 : 0)
+        + (ctx.trend && ctx.trend.score >= 55 ? 16 : 0)
+        + (ctx.retestOk ? 16 : 0)
+        - (ctx.memory.compression ? 10 : 0),
+      trigger:'Take continuation only after BOS retest holds with volume confirmation',
+      warning:'If retest is shallow or late, wait instead of entering mid-leg',
+      direction:ctx => ctx.setup.direction || ctx.forecast.leadDirection || 'NONE'
+    },
+    {
+      id:'SENSEX_CONFIRMATION_FILTER',
+      name:'Sensex confirmation filter',
+      symbols:['^BSESN'],
+      applies:ctx => true,
+      score:ctx => 25
+        + (ctx.bias && ctx.bias.bias !== 'Neutral' ? 12 : 0)
+        + (ctx.setup.direction ? 14 : 0)
+        - (ctx.memory.repeatedSweepCount >= 2 ? 8 : 0),
+      trigger:'Prefer Sensex only when Nifty-style structure confirms; avoid isolated weak signals',
+      warning:'Sensex signals should be cleaner and more confirmed than Nifty/Bank Nifty',
+      direction:ctx => ctx.setup.direction || ctx.forecast.leadDirection || 'NONE'
+    },
+    {
+      id:'GOLD_LIQUIDITY_REVERSAL',
+      name:'Gold liquidity reversal',
+      markets:['crypto_gold_proxy','gold'],
+      applies:ctx => true,
+      score:ctx => 28
+        + (ctx.setup && /sweep|liquidity|reversal/i.test(ctx.setup.setup || '') ? 24 : 0)
+        + (ctx.candle && ctx.candle.rejectionScore >= 55 ? 18 : 0)
+        + (ctx.bias && ctx.bias.bias !== 'Neutral' ? 8 : 0),
+      trigger:'Wait for liquidity sweep, rejection, then CHOCH/retest before entry',
+      warning:'Gold proxy should not be chased into nearby liquidity',
+      direction:ctx => ctx.setup.direction || ctx.formation.side || 'NONE'
+    },
+    {
+      id:'CRYPTO_IMPULSE_RETEST',
+      name:'Crypto impulse retest',
+      markets:['crypto'],
+      applies:ctx => true,
+      score:ctx => 24
+        + (ctx.crypto && ctx.crypto.impulse ? 22 : 0)
+        + (ctx.crypto && ctx.crypto.wickSweep ? 12 : 0)
+        + (ctx.retestOk ? 16 : 0),
+      trigger:'After impulse, wait for retest and acceptance; no chase entries',
+      warning:'Liquidation wicks can reverse quickly; retest is mandatory',
+      direction:ctx => ctx.setup.direction || ctx.forecast.leadDirection || 'NONE'
+    },
+    {
+      id:'COMPRESSION_EXPANSION',
+      name:'Compression expansion wait',
+      markets:['market','crypto','crypto_gold_proxy','indian_index'],
+      applies:ctx => ctx.memory.compression,
+      score:ctx => 42 + (ctx.volume && ctx.volume.score >= 55 ? 12 : 0),
+      trigger:'Wait for range expansion, then retest; do not predict breakout side early',
+      warning:'Compressed markets produce false starts before real expansion',
+      direction:ctx => ctx.forecast.leadDirection || 'NONE'
+    }
+  ];
+
+  function playbookMatches(playbook, ctx){
+    const symbol = String(ctx.symbol || '').toUpperCase();
+    if(playbook.symbols && !playbook.symbols.includes(symbol)) return false;
+    if(playbook.markets && !playbook.markets.includes(ctx.marketType)) return false;
+    return !playbook.applies || playbook.applies(ctx);
+  }
+
+  function rankMarketPlaybooks(ctx){
+    return MARKET_PLAYBOOKS
+      .filter(playbook => playbookMatches(playbook, ctx))
+      .map(playbook => {
+        const rawScore = typeof playbook.score === 'function' ? playbook.score(ctx) : playbook.score || 0;
+        return {
+          id:playbook.id,
+          name:playbook.name,
+          score:Math.round(clamp(rawScore, 0, 100)),
+          trigger:playbook.trigger,
+          warning:playbook.warning,
+          direction:typeof playbook.direction === 'function' ? playbook.direction(ctx) : ctx.setup.direction || 'NONE'
+        };
+      })
+      .sort((a,b) => b.score - a.score);
+  }
+
+  function classifyBrainSituation(ctx, decision){
+    const tags = [];
+    const reasons = [];
+    const session = ctx.session || '';
+    if(decision.tradeStatus === 'BLOCKED' && (decision.reason || []).some(r => /news/i.test(r))){
+      tags.push('NEWS_DAY');
+      reasons.push('News/event risk is controlling the decision.');
+    }
+    if(/India Open Drive/.test(session)){
+      tags.push('OPENING_DRIVE');
+      reasons.push('Opening range discovery is still active.');
+    }
+    if(/India Midday/.test(session) || ctx.memory.compression){
+      tags.push(ctx.memory.compression ? 'COMPRESSION' : 'MIDDAY_CHOP');
+      reasons.push(ctx.memory.compression ? 'Recent range is compressed versus prior range.' : 'Midday session has higher chop risk.');
+    }
+    if(Math.abs(ctx.memory.gapPct || 0) >= 0.35){
+      tags.push('GAP_DAY');
+      reasons.push(`Meaningful gap context: ${round(ctx.memory.gapPct, 2)}%.`);
+    }
+    if(ctx.memory.repeatedSweepCount >= 3){
+      tags.push('TRAP_DAY');
+      reasons.push(`${ctx.memory.repeatedSweepCount} recent sweep/trap candles.`);
+    }
+    if(ctx.memory.expansion){
+      tags.push('EXPANSION');
+      reasons.push('Recent range is expanding versus previous context.');
+    }
+    if(ctx.trend && ctx.trend.score >= 65 && ctx.bias && ctx.bias.bias !== 'Neutral' && !tags.includes('TRAP_DAY')){
+      tags.push('TREND_DAY');
+      reasons.push('Trend quality and higher-timeframe bias are aligned.');
+    }
+    if(!tags.length || (ctx.bias && ctx.bias.bias === 'Neutral' && ctx.memory.repeatedSweepCount >= 1)){
+      tags.push('RANGE_DAY');
+      reasons.push('No clean directional day type dominates yet.');
+    }
+    const primary = tags[0];
+    const meta = BRAIN_LIBRARY.situations.find(s => s.id === primary);
+    return {
+      primary,
+      label:meta ? meta.label : primary,
+      tags:[...new Set(tags)],
+      reasons:[...new Set(reasons)].slice(0, 4)
+    };
+  }
+
+  function evaluateBrainPhilosophy(ctx, decision, plan, risk){
+    const guardrails = [];
+    if(decision.tradeStatus === 'BLOCKED' || (risk && risk.allowed === false)){
+      guardrails.push({id:'CAPITAL_FIRST', severity:'hard', message:'Capital protection overrides setup interest.'});
+    }
+    if(decision.cryptoContext && decision.cryptoContext.chaseRisk){
+      guardrails.push({id:'NO_CHASE', severity:'hard', message:'Market is in chase/whipsaw risk; wait for retest.'});
+    }
+    if(!plan && decision.preferredDirection && decision.preferredDirection !== 'NONE'){
+      guardrails.push({id:'CLEAR_INVALIDATION', severity:'medium', message:'Direction exists but no clean executable plan/invalidation yet.'});
+    }
+    if(plan && plan.riskReward < CONFIG.minRiskReward){
+      guardrails.push({id:'CLEAR_INVALIDATION', severity:'hard', message:'Reward is not enough for the current invalidation.'});
+    }
+    if(ctx.memory.repeatedSweepCount >= 3 && !(decision.setup && /sweep|reversal/i.test(decision.setup.setup || ''))){
+      guardrails.push({id:'QUALITY_OVER_FREQUENCY', severity:'medium', message:'Trap-heavy market requires fewer, cleaner trades.'});
+    }
+    if(!decision.entryTrigger || !decision.entryTrigger.ready){
+      guardrails.push({id:'CONFIRM_BEFORE_COMMIT', severity:'medium', message:'Confirmation is incomplete; wait is intentional.'});
+    }
+    return {
+      guardrails,
+      hardBlock:guardrails.some(g => g.severity === 'hard'),
+      summary:guardrails.length ? guardrails[0].message : 'Philosophy clear: setup can be judged by playbook and risk.'
+    };
+  }
+
+  function evaluateExecutionQuality(decision, plan, ctx){
+    const issues = [];
+    let score = 50;
+    let label = 'WAIT';
+    if(plan){
+      score += 12;
+      if(plan.riskReward >= CONFIG.minRiskReward) score += 18;
+      else issues.push('R:R below minimum');
+      if(plan.entryZone && plan.entryZone.length === 2) score += 8;
+      if(plan.invalidationSource) score += 7;
+    } else {
+      issues.push('No executable entry plan');
+    }
+    if(decision.entryTrigger && decision.entryTrigger.ready) score += 16;
+    else issues.push('Entry trigger is not ready');
+    if(decision.setup && decision.setup.locationOk === false){ score -= 18; issues.push('Poor premium/discount location'); }
+    if(decision.setup && decision.setup.liquidityPathOk === false){ score -= 16; issues.push('Nearby liquidity blocks path'); }
+    if(ctx.crypto && ctx.crypto.chaseRisk){ score -= 22; issues.push('Chase/whipsaw risk active'); }
+    if(ctx.memory.compression && !decision.entryTrigger.ready){ score -= 10; issues.push('Compression needs expansion/retest'); }
+    score = Math.round(clamp(score, 0, 100));
+    if(score >= 82) label = 'IDEAL';
+    else if(score >= 68) label = 'ACCEPTABLE';
+    else if(score >= 48) label = 'EARLY';
+    else label = 'BAD';
+    return {
+      score,
+      label,
+      issues:[...new Set(issues)].slice(0, 5),
+      summary:issues.length ? issues[0] : 'Execution quality is clean enough for the current plan.'
+    };
+  }
+
+  function buildMarketBrain(decision, candles, context){
+    const setup = decision.setup || {};
+    const plan = decision.tradePlan;
+    const brainMemory = buildBrainMarketMemory(candles);
+    const session = decision.tradability && decision.tradability.session || 'Unknown';
+    const marketType = context.account && context.account.marketType || 'market';
+    const forecast = decision.nextStepForecast || {};
+    const formation = decision.formationPlan || {};
+    const early = decision.earlyTrigger || {};
+    const master = decision.masterScore || {};
+    const risk = decision.risk || {};
+    const signal = decision.signalGrade || {};
+    const playbookContext = {
+      symbol:String(context.symbol || (context.account && context.account.symbol) || '').toUpperCase(),
+      marketType,
+      session,
+      memory:brainMemory,
+      setup,
+      formation,
+      forecast,
+      bias:decision.bias || {},
+      regime:decision.regime || {},
+      candle:decision.candleBehavior || {},
+      trend:decision.trendQuality || {},
+      volume:decision.volumeContext || {},
+      crypto:decision.cryptoContext || {},
+      retestOk:!!((decision.longSetup && decision.longSetup.retestOk) || (decision.shortSetup && decision.shortSetup.retestOk))
+    };
+    const rankedPlaybooks = rankMarketPlaybooks(playbookContext);
+    const bestPlaybook = rankedPlaybooks[0] || null;
+    const situation = classifyBrainSituation(playbookContext, decision);
+    const philosophy = evaluateBrainPhilosophy(playbookContext, decision, plan, risk);
+    const executionQuality = evaluateExecutionQuality(decision, plan, playbookContext);
+    const warnings = [];
+    const evidence = [];
+    let playbook = 'No-trade filter';
+    let action = 'WAIT';
+    let direction = plan ? plan.side : setup.direction || formation.side || forecast.leadDirection || 'NONE';
+    let confidence = Math.max(master.score || 0, decision.entryReadinessScore || 0);
+    if(bestPlaybook){
+      playbook = bestPlaybook.name;
+      direction = plan ? plan.side : bestPlaybook.direction || direction;
+      confidence = Math.max(confidence, Math.min(82, bestPlaybook.score));
+      if(bestPlaybook.warning) warnings.push(bestPlaybook.warning);
+    }
+
+    if(decision.tradeStatus === 'BLOCKED' || decision.tradability.status === 'BLOCKED'){
+      action = 'BLOCK';
+      playbook = 'Capital protection';
+      warnings.push(...(decision.reason || ['Blocked by risk/tradability']).slice(0, 3));
+    } else if(marketType === 'indian_index' && session === 'India Open Drive'){
+      action = 'WAIT';
+      playbook = 'Opening range discovery';
+      warnings.push('Wait for the first 15-minute range, then trade sweep/hold confirmation only');
+      confidence = Math.min(confidence, 62);
+    } else if(philosophy.hardBlock){
+      action = 'BLOCK';
+      playbook = bestPlaybook ? bestPlaybook.name : 'Discipline block';
+      warnings.push(philosophy.summary);
+      confidence = Math.min(confidence, 65);
+    } else if(decision.cryptoContext && decision.cryptoContext.chaseRisk){
+      action = 'WAIT';
+      playbook = decision.cryptoContext.isIndianIndex ? 'Index whipsaw filter' : 'Impulse chase filter';
+      warnings.push(...(decision.cryptoContext.warnings || ['Market is moving too aggressively to chase']).slice(0, 3));
+      confidence = Math.min(confidence, 68);
+    } else if(signal.committable && plan && risk.allowed){
+      action = 'DEMO_READY';
+      playbook = bestPlaybook ? bestPlaybook.name : setup.setup || 'Confirmed execution setup';
+      confidence = Math.max(confidence, 78);
+    } else if(early.ready && early.tradePlan){
+      action = 'ALERT';
+      playbook = 'Early liquidity reaction';
+      confidence = Math.max(confidence, early.score || 70);
+    } else if(formation.active && formation.side){
+      action = 'WATCH';
+      playbook = bestPlaybook ? bestPlaybook.name : formation.source === 'liquidity-approach' ? 'Liquidity approach watch' : 'Formation watch';
+      confidence = Math.max(confidence, 55);
+    } else if(brainMemory.compression){
+      action = 'WAIT';
+      playbook = 'Compression breakout wait';
+      warnings.push('Range is compressed; wait for expansion plus retest instead of predicting direction');
+      confidence = Math.min(Math.max(confidence, 45), 60);
+    }
+
+    if(decision.bias && decision.bias.bias !== 'Neutral') evidence.push(`${decision.bias.bias} higher-timeframe bias (${decision.bias.confidence}%)`);
+    if(decision.regime && decision.regime.regime) evidence.push(`Regime: ${decision.regime.regime}`);
+    if(setup.setup) evidence.push(`Setup candidate: ${setup.setup}`);
+    evidence.push(`Situation: ${situation.label}`);
+    evidence.push(`Execution: ${executionQuality.label} ${executionQuality.score}`);
+    if(bestPlaybook) evidence.push(`Best playbook: ${bestPlaybook.name} (${bestPlaybook.score})`);
+    if(plan && plan.riskReward) evidence.push(`Plan R:R 1:${round(plan.riskReward, 2)}`);
+    if(brainMemory.summary) evidence.push(`Past context: ${brainMemory.summary}`);
+    if(decision.liquidityMap && decision.liquidityMap.warning) warnings.push(decision.liquidityMap.warning);
+    if(signal.hardReasons && signal.hardReasons.length) warnings.push(...signal.hardReasons.slice(0, 3));
+    if(philosophy.guardrails.length) warnings.push(philosophy.guardrails[0].message);
+    if(executionQuality.issues.length) warnings.push(executionQuality.issues[0]);
+
+    const nextTrigger = action === 'DEMO_READY' && plan
+      ? `Demo-ready only inside ${round(plan.entryZone[0], priceDigits(plan.entry))}-${round(plan.entryZone[1], priceDigits(plan.entry))}; invalidation ${round(plan.stopLoss, priceDigits(plan.stopLoss))}`
+      : early.active && early.requiredConditions
+        ? early.requiredConditions[0]
+        : bestPlaybook && bestPlaybook.trigger
+          ? bestPlaybook.trigger
+          : formation.trigger || forecast.nextCandleMust || (decision.nextConditionNeeded || [])[0] || 'Wait for a clean sweep, BOS/CHOCH, or retest';
+
+    const finalDecision = action === 'BLOCK' ? 'Do nothing'
+      : action === 'DEMO_READY' ? `Allow demo ${direction}`
+        : action === 'ALERT' ? `Alert ${direction}`
+          : action === 'WATCH' ? `Watch ${direction}`
+            : 'Wait';
+
+    return {
+      name:'GoldPilot Market Brain',
+      action,
+      finalDecision,
+      direction,
+      playbook,
+      playbookRankings:rankedPlaybooks.slice(0, 4),
+      situation,
+      philosophy,
+      executionQuality,
+      memoryHooks:BRAIN_LIBRARY.memoryHooks,
+      confidence:Math.round(clamp(confidence, 0, 100)),
+      marketState:brainMemory.summary,
+      pastContext:brainMemory,
+      currentContext:{
+        session,
+        marketType,
+        tradeStatus:decision.tradeStatus,
+        setupStage:decision.setupStage,
+        preferredDirection:decision.preferredDirection,
+        bias:decision.bias && decision.bias.bias,
+        regime:decision.regime && decision.regime.regime
+      },
+      evidence:[...new Set(evidence)].slice(0, 6),
+      warnings:[...new Set(warnings.filter(Boolean))].slice(0, 5),
+      nextTrigger,
+      autonomy: action === 'DEMO_READY' ? 'Can commit demo only; real trade still needs user confirmation'
+        : action === 'ALERT' ? 'Can alert; wait for full confirmation before commit'
+          : action === 'BLOCK' ? 'Blocks entry'
+            : 'Observation mode'
+    };
+  }
+
   function recentLow(candles, count){
     let low = Infinity;
     for(let i=Math.max(0, candles.length-count); i<candles.length; i++) low = Math.min(low, candles[i].l);
@@ -2374,6 +2830,7 @@
       nextConditionNeeded,
       rawAnalysis:analysis
     };
+    decisionOutput.marketBrain = buildMarketBrain(decisionOutput, candles, context);
     decisionOutput.aiAdvisor = buildAiAdvisor(decisionOutput);
     return decisionOutput;
   }

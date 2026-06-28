@@ -35,7 +35,7 @@ body{background:var(--bg);color:var(--text);font-size:13px;overflow-x:hidden}
   display:flex;align-items:center;justify-content:center;
   font-family:'DM Serif Display',serif;font-size:14px;color:#000;font-weight:700;
 }
-.logo-text{font-size:15px;font-weight:600;letter-spacing:-.2px}
+.logo-text{font-size:15px;font-weight:600;letter-spacing:0}
 .logo-sub{font-size:10px;color:var(--text3);letter-spacing:.8px;text-transform:uppercase;font-family:'DM Mono',monospace}
 
 .nav-pills{display:flex;gap:4px;margin-left:auto}
@@ -406,9 +406,417 @@ svg.chart{width:100%;height:100%}
   .trade-review-grid{grid-template-columns:1fr}
   .trade-actions{flex-direction:column}
 }
+
+/* Visual redesign layer */
+:root{
+  --gold:#D5A93B;--gold-light:#F0C95B;--gold-dim:#7B6228;
+  --bg:#090B10;--bg2:#10141C;--bg3:#161B25;--bg4:#202738;
+  --border:#263041;--border2:#344157;
+  --text:#F1F4F0;--text2:#AAB2B8;--text3:#6F7A84;
+  --green:#35C48B;--red:#F05D63;--amber:#F1A93C;--blue:#4FA7FF;
+  --cyan:#57D7E8;--violet:#9E8CFF;
+  --radius:8px;
+}
+
+body{
+  min-height:100vh;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255,255,255,.018) 1px, transparent 1px),
+    linear-gradient(180deg, #090B10 0%, #0C1018 44%, #080A0F 100%);
+  background-size:48px 48px,48px 48px,100% 100%;
+  color:var(--text);
+  font-size:13px;
+  letter-spacing:0;
+}
+
+.shell{min-height:100vh}
+
+.topbar{
+  position:sticky;top:0;z-index:30;
+  min-height:64px;
+  padding:12px 18px;
+  background:rgba(13,17,25,.94);
+  border-bottom:1px solid rgba(117,137,162,.18);
+  box-shadow:0 10px 30px rgba(0,0,0,.28);
+  backdrop-filter:blur(14px);
+}
+.logo{gap:10px;min-width:188px}
+.logo-icon{
+  width:34px;height:34px;border-radius:8px;
+  color:#12100A;
+  background:linear-gradient(135deg, #F2CC65, #B98721);
+  box-shadow:0 0 0 1px rgba(255,255,255,.16) inset, 0 10px 24px rgba(213,169,59,.18);
+  font-size:16px;
+}
+.logo-text{font-size:16px;font-weight:700;letter-spacing:0}
+.logo-sub{color:var(--text3);letter-spacing:.7px}
+
+.nav-pills{
+  gap:6px;
+  padding:4px;
+  background:rgba(255,255,255,.035);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;
+}
+.pill{
+  padding:7px 11px;
+  border-radius:6px;
+  color:var(--text2);
+  font-weight:500;
+}
+.pill:hover{background:rgba(255,255,255,.055);color:var(--text)}
+.pill.active{
+  background:rgba(213,169,59,.14);
+  border-color:rgba(213,169,59,.34);
+  color:var(--gold-light);
+}
+
+.live-badge{
+  padding:7px 9px;
+  background:rgba(53,196,139,.08);
+  border:1px solid rgba(53,196,139,.22);
+  border-radius:8px;
+}
+.mobile-alert-btn,.symbol-picker select,.settings-actions button,.journal-actions button,.trade-actions button{
+  min-height:32px;
+  background:rgba(255,255,255,.045);
+  border-color:rgba(255,255,255,.1);
+  border-radius:7px;
+}
+.mobile-alert-btn:hover,.settings-actions button:hover,.journal-actions button:hover,.trade-actions button:hover{
+  background:rgba(213,169,59,.12);
+  border-color:rgba(213,169,59,.35);
+}
+.symbol-picker{
+  gap:8px;
+  padding:5px 6px 5px 10px;
+  margin-left:0;
+  background:rgba(255,255,255,.035);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:8px;
+}
+.symbol-picker select{padding:7px 28px 7px 10px}
+
+.main{
+  grid-template-columns:minmax(0,1fr) 340px;
+  gap:12px;
+  padding:12px;
+  flex:0 0 auto;
+}
+.left-col,.right-col{
+  gap:12px;
+  border:0;
+}
+
+.status-hero,.chart-area,.module,.panel,.journal-section{
+  background:rgba(16,20,28,.92);
+  border:1px solid rgba(117,137,162,.15);
+  box-shadow:0 16px 36px rgba(0,0,0,.22);
+}
+.status-hero{
+  padding:18px;
+  border-radius:10px;
+}
+.status-row{
+  display:grid;
+  grid-template-columns:auto minmax(210px,1fr) auto;
+  gap:16px;
+}
+.status-badge{
+  min-width:112px;
+  justify-content:center;
+  display:inline-flex;
+  padding:8px 12px;
+  border-radius:7px;
+  font-size:11px;
+}
+.status-badge.wait{background:rgba(241,169,60,.12);border-color:rgba(241,169,60,.32)}
+.status-badge.allowed{background:rgba(53,196,139,.12);border-color:rgba(53,196,139,.32)}
+.status-badge.blocked{background:rgba(240,93,99,.12);border-color:rgba(240,93,99,.32)}
+.price-display{
+  min-width:190px;
+  padding:10px 12px;
+  background:rgba(255,255,255,.035);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:8px;
+}
+.price-num{font-size:26px;color:var(--text);line-height:1.05}
+.price-change{margin-top:4px}
+.status-reason{
+  margin-top:10px;
+  padding:13px 14px;
+  background:rgba(213,169,59,.07);
+  border:1px solid rgba(213,169,59,.14);
+  border-left:3px solid var(--gold);
+  border-radius:8px;
+}
+
+.chart-area{
+  padding:0;
+  border-radius:10px;
+  overflow:hidden;
+}
+.chart-header{
+  padding:13px 16px;
+  margin:0;
+  border-bottom:1px solid rgba(117,137,162,.13);
+}
+.tf-pills{
+  gap:5px;
+  padding:3px;
+  background:rgba(255,255,255,.035);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;
+}
+.tf{padding:6px 9px;border-radius:6px;color:var(--text3)}
+.tf.active{background:rgba(79,167,255,.12);border-color:rgba(79,167,255,.34);color:#BBDFFF}
+.candle-chart{height:360px;padding:10px 12px 14px}
+.chart .price-grid{stroke:rgba(151,165,183,.09)}
+.chart .current-price-line{stroke:var(--cyan)}
+.chart .current-price-bg{fill:rgba(87,215,232,.12);stroke:rgba(87,215,232,.34)}
+.chart .current-price-text{fill:#BDF7FF}
+.chart-tooltip{
+  border-color:rgba(87,215,232,.28);
+  box-shadow:0 12px 30px rgba(0,0,0,.42);
+}
+
+.modules{
+  gap:12px;
+  background:transparent;
+  flex:0 0 auto;
+}
+.module{
+  min-height:146px;
+  padding:15px;
+  border-radius:10px;
+}
+.module:hover{background:rgba(22,27,37,.98);border-color:rgba(213,169,59,.22)}
+.module-label,.panel-title,.journal-title{
+  color:var(--text3);
+  letter-spacing:.75px;
+}
+.module-title{font-size:15px;font-weight:650}
+.module-sub{color:var(--text2)}
+.score-bar{height:5px;background:rgba(255,255,255,.07);border-radius:4px}
+.tf-bias{
+  min-height:44px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06);
+}
+.bias-dot{width:9px;height:9px}
+
+.panel{
+  padding:14px;
+  border-radius:10px;
+}
+.panel-title{font-size:10px;margin-bottom:11px}
+.signal-card,.demo-trade,.direction-card,.entry-zone,.tp-box,.sl-box{
+  border-radius:8px;
+}
+.signal-card{
+  background:rgba(255,255,255,.035);
+  border-color:rgba(255,255,255,.09);
+}
+.brain-card{
+  background:linear-gradient(180deg, rgba(87,215,232,.08), rgba(255,255,255,.035));
+  border:1px solid rgba(87,215,232,.2);
+}
+.brain-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:9px}
+.brain-action{
+  font-family:'DM Mono',monospace;
+  font-size:11px;
+  color:var(--cyan);
+  padding:4px 7px;
+  border-radius:6px;
+  border:1px solid rgba(87,215,232,.25);
+  background:rgba(87,215,232,.08);
+}
+.brain-title{font-size:14px;font-weight:700;margin-bottom:3px}
+.brain-sub{font-size:11px;color:var(--text2);line-height:1.45}
+.brain-meter{height:5px;background:rgba(255,255,255,.08);border-radius:5px;overflow:hidden;margin:9px 0}
+.brain-meter-fill{height:100%;width:0;background:linear-gradient(90deg,var(--cyan),var(--gold));border-radius:5px;transition:width .4s ease}
+.brain-list{display:flex;flex-direction:column;gap:5px;margin-top:8px}
+.brain-line{font-size:11px;color:var(--text2);line-height:1.45}
+.brain-line b{color:var(--text);font-weight:600}
+.signal-header{gap:8px}
+.signal-type{font-size:12px}
+.signal-time{
+  padding:3px 6px;
+  background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:5px;
+}
+.direction-card{background:rgba(9,11,16,.45)}
+.direction-card.long{border-color:rgba(53,196,139,.28)}
+.direction-card.short{border-color:rgba(240,93,99,.28)}
+.entry-zone{background:rgba(53,196,139,.08);border-color:rgba(53,196,139,.24)}
+.tp-box{background:rgba(53,196,139,.065);border-color:rgba(53,196,139,.18)}
+.sl-box{background:rgba(240,93,99,.065);border-color:rgba(240,93,99,.18)}
+.rr-bar{height:5px;background:rgba(255,255,255,.07)}
+.rr-fill{background:linear-gradient(90deg, var(--gold), var(--cyan))}
+
+.risk-row,.liq-item,.news-item{
+  padding:8px 0;
+  border-color:rgba(117,137,162,.13);
+}
+.liq-tag,.news-tag{border-radius:5px}
+.setting-field input,.trade-review-field select,.trade-review-field input,.trade-review-field textarea{
+  min-height:33px;
+  background:rgba(255,255,255,.045);
+  border-color:rgba(255,255,255,.1);
+  border-radius:7px;
+}
+.setting-field input:focus,.trade-review-field select:focus,.trade-review-field input:focus,.trade-review-field textarea:focus{
+  border-color:rgba(87,215,232,.45);
+  box-shadow:0 0 0 2px rgba(87,215,232,.08);
+}
+
+.watch-alert{
+  background:rgba(87,215,232,.07);
+  border-color:rgba(87,215,232,.18);
+  border-radius:8px;
+}
+.watch-alert b{color:var(--cyan)}
+.watchlist-row{
+  grid-template-columns:78px 1fr 66px;
+  padding:9px 4px;
+  border-color:rgba(117,137,162,.13);
+}
+.watchlist-row:hover{background:rgba(87,215,232,.045)}
+
+.journal-section{
+  margin:0 12px 12px;
+  padding:16px;
+  border-radius:10px;
+}
+.journal-table-wrap{border-color:rgba(117,137,162,.16);border-radius:8px}
+.journal-table{background:rgba(9,11,16,.55)}
+.journal-table th{
+  background:rgba(255,255,255,.045);
+  color:var(--text3);
+}
+.journal-table th,.journal-table td{border-color:rgba(117,137,162,.12);padding:9px 10px}
+
+.bottom-bar{
+  position:sticky;bottom:0;z-index:25;
+  margin:0 12px 12px;
+  padding:10px 12px;
+  background:rgba(13,17,25,.94);
+  border:1px solid rgba(117,137,162,.16);
+  border-radius:10px;
+  box-shadow:0 -10px 30px rgba(0,0,0,.22);
+  backdrop-filter:blur(14px);
+}
+.stat-pill{
+  padding:5px 8px;
+  border-radius:7px;
+  background:rgba(255,255,255,.045);
+  border-color:rgba(255,255,255,.08);
+}
+.stat-pill span{color:var(--text)}
+
+@media (max-width: 1100px){
+  .main{grid-template-columns:1fr}
+  .right-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+  .right-col .panel{height:auto}
+}
+
+@media (max-width: 760px){
+  .topbar{position:relative;gap:10px}
+  .logo{min-width:0}
+  .live-badge{margin-left:0!important}
+  .symbol-picker{width:100%}
+  .symbol-picker select{flex:1;width:100%}
+  .main{padding:10px;gap:10px}
+  .status-row{grid-template-columns:1fr}
+  .price-display{width:100%;text-align:left}
+  .modules,.right-col{grid-template-columns:1fr}
+  .candle-chart{height:310px}
+  .bottom-bar{position:relative;margin:0 10px 10px}
+  .journal-section{margin:0 10px 10px}
+}
+
+/* App page system */
+.page-titlebar{
+  display:none;
+  margin:12px 12px 0;
+  padding:14px 16px;
+  background:rgba(16,20,28,.92);
+  border:1px solid rgba(117,137,162,.15);
+  border-radius:10px;
+  box-shadow:0 16px 36px rgba(0,0,0,.18);
+}
+.page-kicker{
+  color:var(--text3);
+  font-family:'DM Mono',monospace;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.75px;
+  margin-bottom:3px;
+}
+.page-heading{font-size:20px;font-weight:700;line-height:1.2}
+.page-subtitle{font-size:12px;color:var(--text2);margin-top:4px}
+body[data-page="Dashboard"] .page-titlebar,
+body[data-page="Analysis"] .page-titlebar,
+body[data-page="Backtests"] .page-titlebar,
+body[data-page="Journal"] .page-titlebar,
+body[data-page="Settings"] .page-titlebar{display:block}
+body[data-page="Dashboard"] .page-titlebar{display:none}
+
+body[data-page="Journal"] #dashboard-section,
+body[data-page="Journal"] .bottom-bar{display:none}
+body[data-page="Dashboard"] #journal-section,
+body[data-page="Dashboard"] #trade-review-section,
+body[data-page="Analysis"] #journal-section,
+body[data-page="Analysis"] #trade-review-section,
+body[data-page="Backtests"] #journal-section,
+body[data-page="Backtests"] #trade-review-section,
+body[data-page="Settings"] #journal-section,
+body[data-page="Settings"] #trade-review-section{display:none}
+
+body[data-page="Analysis"] .main,
+body[data-page="Backtests"] .main,
+body[data-page="Settings"] .main{grid-template-columns:1fr}
+body[data-page="Analysis"] .right-col,
+body[data-page="Backtests"] .right-col,
+body[data-page="Settings"] .right-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+
+body[data-page="Analysis"] .status-hero,
+body[data-page="Analysis"] .chart-area,
+body[data-page="Analysis"] #settings-section,
+body[data-page="Analysis"] #demo-panel,
+body[data-page="Analysis"] #risk-panel,
+body[data-page="Analysis"] #watchlist-panel{display:none}
+body[data-page="Analysis"] .left-col{display:block}
+body[data-page="Analysis"] .modules{grid-template-columns:repeat(2,minmax(0,1fr))}
+
+body[data-page="Backtests"] .left-col,
+body[data-page="Backtests"] #brain-panel,
+body[data-page="Backtests"] #settings-section,
+body[data-page="Backtests"] #risk-panel,
+body[data-page="Backtests"] #news-panel,
+body[data-page="Backtests"] #checklist-panel{display:none}
+body[data-page="Backtests"] .right-col{grid-template-columns:repeat(2,minmax(0,1fr))}
+
+body[data-page="Settings"] .left-col,
+body[data-page="Settings"] #brain-panel,
+body[data-page="Settings"] #demo-panel,
+body[data-page="Settings"] #news-panel,
+body[data-page="Settings"] #checklist-panel,
+body[data-page="Settings"] #watchlist-panel{display:none}
+body[data-page="Settings"] .right-col{grid-template-columns:minmax(320px,520px) minmax(320px,520px);justify-content:start}
+
+@media (max-width: 760px){
+  .page-titlebar{margin:10px 10px 0}
+  body[data-page="Analysis"] .right-col,
+  body[data-page="Backtests"] .right-col,
+  body[data-page="Settings"] .right-col,
+  body[data-page="Analysis"] .modules{grid-template-columns:1fr}
+}
 </style>
 </head>
-<body>
+<body data-page="Dashboard">
 
 <div class="shell">
   <!-- TOP BAR -->
@@ -444,6 +852,12 @@ svg.chart{width:100%;height:100%}
         <option value="SOLUSDT">SOLUSDT</option>
       </select>
     </div>
+  </div>
+
+  <div class="page-titlebar" id="page-titlebar">
+    <div class="page-kicker">Workspace</div>
+    <div class="page-heading" id="page-heading">Dashboard</div>
+    <div class="page-subtitle" id="page-subtitle">Live market decision cockpit</div>
   </div>
 
   <!-- MAIN GRID -->
@@ -596,6 +1010,29 @@ svg.chart{width:100%;height:100%}
     <div class="right-col">
 
       <!-- SIGNAL CARD -->
+      <div class="panel" id="brain-panel">
+        <div class="panel-title"><i class="ti ti-brain" aria-hidden="true"></i>Market Brain</div>
+        <div class="signal-card brain-card">
+          <div class="brain-row">
+            <div>
+              <div class="brain-title" id="brain-final">Waiting for market context</div>
+              <div class="brain-sub" id="brain-playbook">Brain will compare past context, current chart, and playbook rules.</div>
+            </div>
+            <div class="brain-action" id="brain-action">WAIT</div>
+          </div>
+          <div class="brain-meter"><div class="brain-meter-fill" id="brain-confidence-fill"></div></div>
+          <div class="brain-sub" id="brain-confidence">Confidence 0%</div>
+          <div class="brain-list">
+            <div class="brain-line"><b>Situation:</b> <span id="brain-situation">-</span></div>
+            <div class="brain-line"><b>Discipline:</b> <span id="brain-discipline">-</span></div>
+            <div class="brain-line"><b>Past:</b> <span id="brain-past">-</span></div>
+            <div class="brain-line"><b>Library:</b> <span id="brain-library">-</span></div>
+            <div class="brain-line"><b>Next:</b> <span id="brain-next">-</span></div>
+            <div class="brain-line"><b>Warning:</b> <span id="brain-warning">-</span></div>
+          </div>
+        </div>
+      </div>
+
       <div class="panel" id="settings-section">
         <div class="panel-title"><i class="ti ti-bolt" aria-hidden="true"></i>Next valid signal</div>
         <div class="signal-card">
@@ -772,12 +1209,12 @@ svg.chart{width:100%;height:100%}
       </div>
 
       <!-- SETUP CHECKLIST -->
-      <div class="panel" style="flex:1">
+      <div class="panel" id="checklist-panel" style="flex:1">
         <div class="panel-title"><i class="ti ti-list-check" aria-hidden="true"></i>Setup checklist</div>
         <div id="checklist"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="watchlist-panel">
         <div class="panel-title"><i class="ti ti-radar" aria-hidden="true"></i>Market Watchlist Alerts</div>
         <div id="watchlist-alerts" class="watch-alert">Scanning configured markets.</div>
         <div id="crypto-watchlist">

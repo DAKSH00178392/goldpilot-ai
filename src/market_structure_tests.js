@@ -44,6 +44,9 @@ ok(decision.longSetup && decision.shortSetup && decision.preferredDirection, 'Go
 ok(decision.nextStepForecast && decision.nextStepForecast.nextCandleMust, 'GoldPilot decision returns next-step candle forecast');
 ok(decision.formationPlan && decision.formationPlan.phase, 'GoldPilot decision returns future trade formation plan');
 ok(decision.earlyTrigger && decision.earlyTrigger.stage, 'GoldPilot decision returns early trigger validation state');
+ok(decision.marketBrain && decision.marketBrain.action && decision.marketBrain.nextTrigger, 'GoldPilot decision returns market brain action layer');
+ok(Array.isArray(decision.marketBrain.playbookRankings), 'GoldPilot market brain returns ranked knowledge playbooks');
+ok(decision.marketBrain.situation && decision.marketBrain.philosophy && decision.marketBrain.executionQuality, 'GoldPilot market brain returns situation/philosophy/execution structure');
 ok(decision.aiAdvisor && decision.aiAdvisor.summary && decision.aiAdvisor.nextBestActions, 'GoldPilot decision returns AI advisor desk read');
 for(const candidate of [decision.longSetup, decision.shortSetup]){
   if(candidate && candidate.tradePlan){
@@ -75,6 +78,8 @@ ok(engineSource.includes('engulfing'), 'engine validates engulfing candle struct
 ok(engineSource.includes('momentumRun'), 'engine scores consecutive candle momentum runs');
 ok(engineSource.includes('buildMasterScore'), 'engine builds weighted GoldPilot master score');
 ok(engineSource.includes('buildAiAdvisor'), 'engine builds AI advisor narrative layer');
+ok(engineSource.includes('MARKET_PLAYBOOKS'), 'engine includes market knowledge playbook library');
+ok(engineSource.includes('BRAIN_LIBRARY') && engineSource.includes('classifyBrainSituation'), 'engine structures brain philosophy and situation knowledge');
 ok(engineSource.includes('ELITE_SETUP'), 'master score supports elite setup tier');
 ok(engineSource.includes('isClosed !== false'), 'engine ignores still-forming candles for decisions');
 ok(engineSource.includes('hasDirectionalStructure'), 'engine requires setup-direction structure confirmation');
@@ -140,6 +145,8 @@ ok(dashboardHtml.includes('setting-ai-enabled'), 'dashboard exposes optional Oll
 ok(dashboardHtml.includes('setting-ai-model'), 'dashboard exposes local AI model setting');
 ok(dashboardHtml.includes('enable-mobile-alerts'), 'dashboard exposes mobile alert permission control');
 ok(dashboardHtml.includes('mobile-alert-strip'), 'dashboard exposes mobile in-app alert strip');
+ok(dashboardHtml.includes('id="brain-panel"'), 'dashboard exposes market brain panel');
+ok(dashboardHtml.includes('brain-situation') && dashboardHtml.includes('brain-discipline'), 'dashboard exposes brain situation and discipline fields');
 ok(dashboardHtml.includes('id="demo-panel"'), 'dashboard has dedicated demo panel id');
 ok(dashboardHtml.includes('id="risk-panel"'), 'dashboard has dedicated risk panel id');
 ok(dashboardHtml.includes('id="news-panel"'), 'dashboard has dedicated news panel id');
@@ -178,6 +185,7 @@ ok(connectorJs.includes("'4H':confirmedH4"), 'watchlist scan includes 4H context
 ok(connectorJs.includes("'D':confirmedD1"), 'watchlist scan includes daily context');
 ok(connectorJs.includes('formatAge'), 'watchlist displays scan age to avoid stale-row confusion');
 ok(connectorJs.includes('monitorScore'), 'watchlist shows monitoring score even when no setup is active');
+ok(connectorJs.includes('marketChangePct') && connectorJs.includes('Move ${pct(row.marketChangePct)}'), 'watchlist separates real market move percent from setup score');
 ok(connectorJs.includes('watchlistCommitSummary'), 'watchlist explains why no trade committed');
 ok(connectorJs.includes('Committed today'), 'watchlist summary shows committed trade count');
 ok(connectorJs.includes('Best forming'), 'watchlist summary shows best forming setup');
@@ -226,6 +234,7 @@ ok(connectorJs.includes('breakEvenArmed'), 'demo trade management arms breakeven
 ok(connectorJs.includes('tp2 != null'), 'committed signal TP checks ignore missing targets');
 ok(connectorJs.includes('renderDemoTrades'), 'dashboard renders remembered demo trades');
 ok(dashboardHtml.includes('demo-trades'), 'dashboard exposes demo trades panel');
+ok(connectorJs.includes('renderMarketBrain'), 'dashboard renders market brain decisions');
 ok(connectorJs.includes('nextStepForecast'), 'dashboard displays next-step forecast from engine');
 ok(connectorJs.includes('formationPlan'), 'dashboard displays future trade formation plan');
 ok(connectorJs.includes('earlyEntryZone'), 'dashboard displays early entry zone when no confirmed plan exists');
