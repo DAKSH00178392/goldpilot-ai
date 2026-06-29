@@ -107,6 +107,7 @@
   let liveNewsEvents = [];
   let liveNewsFetchedAt = 0;
   let newsSourceStatus = 'Manual';
+  let marketDataSourceMode = 'live';
   let cloudHydrated = false;
   let cloudSyncTimer = null;
   let cloudSyncInFlight = false;
@@ -318,7 +319,7 @@
     const profile = profileForSymbol(symbol);
     const reason = err && err.message ? err.message : String(err || 'Unknown data error');
     if(profile.dataSource === 'yahoo' && !cloudApiEnabled()){
-      return `${reason}. Browser access to Yahoo can be blocked or rate-limited. Configure localStorage.goldpilotCloudApiBase or window.GOLDPILOT_API_BASE to your worker for /api/market-candles fallback.`;
+      return `${reason}. Browser access to Yahoo can be blocked or rate-limited. Configure localStorage.goldpilotCloudApiBase or window.GOLDPILOT_API_BASE to your worker for /api/market-candles fallback; bundled Indian snapshot data is used when available.`;
     }
     return reason;
   }
@@ -1256,7 +1257,29 @@
         lastError = err;
       }
     }
+    const cachedRows = cachedIndianKlines(profile.yahooSymbol || symbol, interval, limit);
+    if(cachedRows.length){
+      marketDataSourceMode = 'cache';
+      return cachedRows;
+    }
     throw lastError || new Error(`${profile.displayName || symbol} Yahoo candles unavailable`);
+  }
+
+  function cachedIndianKlines(symbol, interval, limit){
+    const cache = window.GOLDPILOT_INDIAN_MARKET_CACHE;
+    const normalized = normalizeMarketSymbol(symbol);
+    const symbolCache = cache && cache.symbols && cache.symbols[normalized];
+    if(!symbolCache) return [];
+    const fallbackOrder = interval === '1m'
+      ? ['1m', '5m', '15m', '1h', '1d']
+      : [interval, '15m', '5m', '1h', '1d'];
+    for(const key of fallbackOrder){
+      const rows = Array.isArray(symbolCache[key]) ? symbolCache[key] : [];
+      if(rows.length >= 5){
+        return rows.slice(-limit).map(row => Object.assign({}, row, {isClosed:row.isClosed !== false, cached:true}));
+      }
+    }
+    return [];
   }
 
   async function fetchKlines(interval, limit=CONFIG.candlesLimit, symbol=CONFIG.symbol){
@@ -1452,6 +1475,7 @@
 
   async function refreshMarketData(){
     setConnection('CONNECTING', 'var(--amber)');
+    marketDataSourceMode = 'live';
     const profile = profileForSymbol(CONFIG.symbol);
     const timeframeResults = await Promise.allSettled(TIMEFRAMES.map(async ([label, interval]) => {
       const rows = await fetchKlines(interval);
@@ -1485,7 +1509,9 @@
     await updateDemoTrades();
     const decision = buildDecision();
     renderDashboard(decision);
-    setConnection(loadErrors.length ? 'PARTIAL DATA' : 'LIVE', loadErrors.length ? 'var(--amber)' : 'var(--green)');
+    const connectionText = marketDataSourceMode === 'cache' ? 'CACHED DATA' : loadErrors.length ? 'PARTIAL DATA' : 'LIVE';
+    const connectionColor = marketDataSourceMode === 'cache' || loadErrors.length ? 'var(--amber)' : 'var(--green)';
+    setConnection(connectionText, connectionColor);
     if(loadErrors.length) console.warn(`${CONFIG.symbol} partial market data`, loadErrors);
   }
 

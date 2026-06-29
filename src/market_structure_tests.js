@@ -153,6 +153,7 @@ ok(dashboardHtml.includes('id="news-panel"'), 'dashboard has dedicated news pane
 ok(dashboardHtml.includes('journal-rows'), 'dashboard exposes signal journal table');
 ok(dashboardHtml.includes('trade-review-form'), 'dashboard exposes trade review form');
 ok(dashboardHtml.includes('crypto-watchlist'), 'dashboard exposes crypto watchlist');
+ok(dashboardHtml.includes('src/indian_market_cache.js'), 'dashboard loads bundled Indian market fallback cache');
 ok(dashboardHtml.includes('BTCUSDT'), 'dashboard includes BTC as selectable symbol');
 ok(dashboardHtml.includes('direction-grid'), 'dashboard shows long and short setup cards');
 ok(dashboardHtml.includes('id="signal-card"'), 'dashboard has a dedicated entry signal card id');
@@ -177,6 +178,8 @@ ok(connectorJs.includes('navigator.vibrate'), 'mobile alerts use vibration when 
 ok(connectorJs.includes('wireMobileAlerts'), 'live connector wires mobile alert permission control');
 ok(connectorJs.includes('refreshLiveNews'), 'live connector fetches live market news');
 ok(connectorJs.includes('/api/market-candles') && connectorJs.includes('marketDataErrorHint'), 'live connector has Indian market data proxy fallback guidance');
+ok(connectorJs.includes('cachedIndianKlines') && connectorJs.includes('GOLDPILOT_INDIAN_MARKET_CACHE'), 'live connector can fall back to bundled Indian market candles');
+ok(connectorJs.includes('CACHED DATA'), 'live connector labels bundled snapshot market data');
 ok(connectorJs.includes('normalizeMarketSymbol') && connectorJs.includes("SENSEX:'^BSESN'"), 'live connector normalizes Indian market aliases');
 ok(connectorJs.includes('renderSymbolLoading(next)') && connectorJs.includes('clearChart()'), 'live connector clears stale chart while switching symbols');
 ok(connectorJs.includes('api.gdeltproject.org'), 'live connector uses GDELT live news feed');
