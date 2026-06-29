@@ -155,6 +155,7 @@ ok(dashboardHtml.includes('trade-review-form'), 'dashboard exposes trade review 
 ok(dashboardHtml.includes('crypto-watchlist'), 'dashboard exposes crypto watchlist');
 ok(dashboardHtml.includes('BTCUSDT'), 'dashboard includes BTC as selectable symbol');
 ok(dashboardHtml.includes('direction-grid'), 'dashboard shows long and short setup cards');
+ok(dashboardHtml.includes('id="signal-card"'), 'dashboard has a dedicated entry signal card id');
 ok(dashboardHtml.includes('id="journal-section"'), 'dashboard navbar can target journal section');
 const connectorPath = path.join(__dirname, 'goldpilot_live_dashboard.js');
 const connectorJs = fs.readFileSync(connectorPath, 'utf8');
@@ -175,6 +176,9 @@ ok(connectorJs.includes('pushMobileAlert'), 'live connector can send mobile/brow
 ok(connectorJs.includes('navigator.vibrate'), 'mobile alerts use vibration when supported');
 ok(connectorJs.includes('wireMobileAlerts'), 'live connector wires mobile alert permission control');
 ok(connectorJs.includes('refreshLiveNews'), 'live connector fetches live market news');
+ok(connectorJs.includes('/api/market-candles') && connectorJs.includes('marketDataErrorHint'), 'live connector has Indian market data proxy fallback guidance');
+ok(connectorJs.includes('normalizeMarketSymbol') && connectorJs.includes("SENSEX:'^BSESN'"), 'live connector normalizes Indian market aliases');
+ok(connectorJs.includes('renderSymbolLoading(next)') && connectorJs.includes('clearChart()'), 'live connector clears stale chart while switching symbols');
 ok(connectorJs.includes('api.gdeltproject.org'), 'live connector uses GDELT live news feed');
 ok(connectorJs.includes('isEnglishNews'), 'live connector filters GDELT headlines to English');
 ok(connectorJs.includes('isTradingNewsTitle'), 'live connector filters headlines to trading-related news');
@@ -235,6 +239,8 @@ ok(connectorJs.includes('tp2 != null'), 'committed signal TP checks ignore missi
 ok(connectorJs.includes('renderDemoTrades'), 'dashboard renders remembered demo trades');
 ok(dashboardHtml.includes('demo-trades'), 'dashboard exposes demo trades panel');
 ok(connectorJs.includes('renderMarketBrain'), 'dashboard renders market brain decisions');
+ok(connectorJs.includes("qs('#signal-card')") && connectorJs.includes('displayActionableTradePlan'), 'entry card renderer targets actionable signal card only');
+ok(connectorJs.includes('displayFormationPlan') && !connectorJs.includes('hint.textContent = aiVerdict;\\n        return;'), 'entry card renderer refreshes levels after advisor text');
 ok(connectorJs.includes('nextStepForecast'), 'dashboard displays next-step forecast from engine');
 ok(connectorJs.includes('formationPlan'), 'dashboard displays future trade formation plan');
 ok(connectorJs.includes('earlyEntryZone'), 'dashboard displays early entry zone when no confirmed plan exists');
@@ -251,6 +257,7 @@ ok(connectorJs.includes('planHasValidReward'), 'dashboard marks TP levels as wai
 ok(connectorJs.includes('NO ENTRY - TARGET TOO CLOSE'), 'dashboard hides actionable entry zone when reward is invalid');
 ok(workerJs.includes('scheduled(event, env, ctx)'), 'cloud scanner worker has scheduled cron handler');
 ok(workerJs.includes('/api/latest-signals'), 'cloud scanner worker exposes latest signals API');
+ok(workerJs.includes('/api/market-candles'), 'cloud scanner worker exposes market candle proxy API');
 ok(workerJs.includes('committed_signals'), 'cloud scanner worker stores committed signals');
 ok(workerJs.includes('signalGrade.committable'), 'cloud scanner worker commits only graded signals');
 ok(workerJs.includes('/api/demo-state'), 'cloud scanner worker exposes shared demo state API');

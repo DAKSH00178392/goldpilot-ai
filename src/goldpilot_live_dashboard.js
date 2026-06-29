@@ -222,7 +222,7 @@
   }
 
   function profileForSymbol(symbol=CONFIG.symbol){
-    const normalized = String(symbol || '').toUpperCase().trim();
+    const normalized = normalizeMarketSymbol(symbol);
     return MARKET_PROFILES[normalized] || {
       symbol:normalized,
       displayName:normalized,
@@ -232,6 +232,21 @@
       minLot:0.01,
       tickValuePerLot:1
     };
+  }
+
+  function normalizeMarketSymbol(symbol){
+    const raw = String(symbol || '').toUpperCase().trim().replace(/\s+/g, '');
+    const aliases = {
+      NIFTY:'^NSEI',
+      NIFTY50:'^NSEI',
+      NSEI:'^NSEI',
+      BANKNIFTY:'^NSEBANK',
+      NIFTYBANK:'^NSEBANK',
+      NSEBANK:'^NSEBANK',
+      SENSEX:'^BSESN',
+      BSESN:'^BSESN'
+    };
+    return aliases[raw] || raw;
   }
 
   function displayNameForSymbol(symbol){
@@ -297,6 +312,15 @@
 
   function cloudApiEnabled(){
     return !!cloudApiBase();
+  }
+
+  function marketDataErrorHint(symbol, err){
+    const profile = profileForSymbol(symbol);
+    const reason = err && err.message ? err.message : String(err || 'Unknown data error');
+    if(profile.dataSource === 'yahoo' && !cloudApiEnabled()){
+      return `${reason}. Browser access to Yahoo can be blocked or rate-limited. Configure localStorage.goldpilotCloudApiBase or window.GOLDPILOT_API_BASE to your worker for /api/market-candles fallback.`;
+    }
+    return reason;
   }
 
   async function cloudApi(path, options={}){
@@ -546,7 +570,7 @@
   }
 
   async function fetchSymbolLastPrice(symbol){
-    const normalized = String(symbol || '').toUpperCase();
+    const normalized = normalizeMarketSymbol(symbol);
     if(!normalized) return null;
     if(normalized === CONFIG.symbol){
       const current = currentMarketPrice();
@@ -1039,6 +1063,36 @@
     return isTradePlanPriceCompatible(plan) ? plan : null;
   }
 
+  function displayActionableTradePlan(decision){
+    const plan = decision && decision.tradePlan ? decision.tradePlan : null;
+    if(!isTradePlanPriceCompatible(plan)) return null;
+    if(decision.tradeStatus && decision.tradeStatus.includes('COMMITTED')) return plan;
+    if(isCommittableDecision(decision)) return plan;
+    if(decision.tradeStatus === 'ENTRY READY') return plan;
+    if(decision.signalGrade && decision.signalGrade.committable && decision.risk && decision.risk.allowed) return plan;
+    return null;
+  }
+
+  function displayFormationPlan(decision){
+    const formation = decision && decision.formationPlan ? decision.formationPlan : null;
+    if(!formation) return null;
+    const zone = Array.isArray(formation.earlyEntryZone) ? formation.earlyEntryZone : [];
+    const reference = planPriceReference();
+    if(reference != null && zone.length){
+      const center = zone.map(Number).filter(Number.isFinite).reduce((sum, value) => sum + value, 0) / zone.length;
+      if(!isFinite(center) || center <= 0) return null;
+      const ratio = center / reference;
+      if(ratio < 0.25 || ratio > 4) return null;
+    }
+    if(reference != null && formation.invalidation != null){
+      const invalidation = Number(formation.invalidation);
+      if(!isFinite(invalidation) || invalidation <= 0) return null;
+      const ratio = invalidation / reference;
+      if(ratio < 0.25 || ratio > 4) return null;
+    }
+    return formation;
+  }
+
   function displaySetup(decision){
     const candidate = bestSetupCandidate(decision);
     if(decision.earlyTrigger && decision.earlyTrigger.ready){
@@ -1179,9 +1233,30 @@
     const profile = profileForSymbol(symbol);
     const cfg = YAHOO_INTERVALS[interval] || YAHOO_INTERVALS['15m'];
     const yahooSymbol = encodeURIComponent(profile.yahooSymbol || symbol);
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=${cfg.interval}&range=${cfg.range}&includePrePost=false`;
-    const rows = normalizeYahooChart(await fetchJson(url), cfg.aggregate || 1);
-    return rows.slice(-limit);
+    const path = `/v8/finance/chart/${yahooSymbol}?interval=${cfg.interval}&range=${cfg.range}&includePrePost=false`;
+    const urls = [
+      `https://query1.finance.yahoo.com${path}`,
+      `https://query2.finance.yahoo.com${path}`
+    ];
+    let lastError = null;
+    for(const url of urls){
+      try{
+        const rows = normalizeYahooChart(await fetchJson(url), cfg.aggregate || 1);
+        if(rows.length) return rows.slice(-limit);
+      } catch(err){
+        lastError = err;
+      }
+    }
+    if(cloudApiEnabled()){
+      try{
+        const data = await cloudApi(`/api/market-candles?symbol=${encodeURIComponent(profile.yahooSymbol || symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(limit)}`);
+        const rows = data && Array.isArray(data.candles) ? data.candles : [];
+        if(rows.length) return rows.slice(-limit);
+      } catch(err){
+        lastError = err;
+      }
+    }
+    throw lastError || new Error(`${profile.displayName || symbol} Yahoo candles unavailable`);
   }
 
   async function fetchKlines(interval, limit=CONFIG.candlesLimit, symbol=CONFIG.symbol){
@@ -1378,11 +1453,24 @@
   async function refreshMarketData(){
     setConnection('CONNECTING', 'var(--amber)');
     const profile = profileForSymbol(CONFIG.symbol);
-    const timeframeLoads = TIMEFRAMES.map(async ([label, interval]) => {
-      candlesByTimeframe[label] = await fetchKlines(interval);
+    const timeframeResults = await Promise.allSettled(TIMEFRAMES.map(async ([label, interval]) => {
+      const rows = await fetchKlines(interval);
+      return [label, rows];
+    }));
+    const loadErrors = [];
+    timeframeResults.forEach((result, i) => {
+      const label = TIMEFRAMES[i][0];
+      if(result.status === 'fulfilled'){
+        candlesByTimeframe[result.value[0]] = result.value[1];
+      } else {
+        loadErrors.push(`${label}: ${result.reason && result.reason.message ? result.reason.message : result.reason}`);
+      }
     });
+    const hasPrimaryCandles = confirmedCandles(candlesByTimeframe[activeTimeframe] || candlesByTimeframe['15M'] || []).length >= 5;
+    if(!hasPrimaryCandles){
+      throw new Error(loadErrors[0] || `${CONFIG.symbol} market candles unavailable`);
+    }
     await Promise.all([
-      ...timeframeLoads,
       profile.dataSource === 'yahoo'
         ? Promise.resolve()
         : fetchTicker().then(t => { latestTicker = t; }),
@@ -1397,7 +1485,8 @@
     await updateDemoTrades();
     const decision = buildDecision();
     renderDashboard(decision);
-    setConnection('LIVE', 'var(--green)');
+    setConnection(loadErrors.length ? 'PARTIAL DATA' : 'LIVE', loadErrors.length ? 'var(--amber)' : 'var(--green)');
+    if(loadErrors.length) console.warn(`${CONFIG.symbol} partial market data`, loadErrors);
   }
 
   function setActiveTimeframe(label){
@@ -1410,7 +1499,7 @@
   }
 
   function setPrimarySymbol(symbol, timeframe){
-    const next = String(symbol || CONFIG.symbol).toUpperCase().trim();
+    const next = normalizeMarketSymbol(symbol || CONFIG.symbol);
     if(timeframe) setActiveTimeframe(timeframe);
     if(!next || next === CONFIG.symbol){
       if(Object.keys(candlesByTimeframe).length) renderDashboard(buildDecision());
@@ -1425,10 +1514,11 @@
     latestTicker = null;
     lastJournalSignature = null;
     setConnection('CONNECTING', 'var(--amber)');
+    renderSymbolLoading(next);
     refreshMarketData().catch(err => {
       console.error(err);
       setConnection('DATA ERROR', 'var(--red)');
-      setHtml('#status-reason', `<b>Data error.</b> ${escapeHtml(err.message)}. Check ${escapeHtml(next)} availability.`);
+      setHtml('#status-reason', `<b>Data error.</b> ${escapeHtml(marketDataErrorHint(next, err))}`);
     });
   }
 
@@ -1443,7 +1533,14 @@
 
   async function scanWatchlist(){
     const symbols = loadWatchlistSymbols();
-    const rows = await Promise.all(symbols.map(scanWatchSymbol));
+    const results = await Promise.allSettled(symbols.map(scanWatchSymbol));
+    const failed = [];
+    const rows = results.map((result, i) => {
+      if(result.status === 'fulfilled') return result.value;
+      failed.push(`${symbols[i]}: ${result.reason && result.reason.message ? result.reason.message : result.reason}`);
+      return null;
+    });
+    if(failed.length) console.warn('watchlist partial data', failed);
     watchlistRows = rows.filter(Boolean).sort((a,b) => b.score - a.score);
     renderWatchlist();
     notifyConfirmedTrades(watchlistRows);
@@ -1452,7 +1549,7 @@
   function loadWatchlistSymbols(){
     try{
       const saved = JSON.parse(localStorage.getItem('goldpilotWatchlistSymbols') || '[]');
-      if(Array.isArray(saved) && saved.length) return saved.map(s => String(s).toUpperCase().trim()).filter(Boolean);
+      if(Array.isArray(saved) && saved.length) return saved.map(normalizeMarketSymbol).filter(Boolean);
     } catch(e){}
     return WATCHLIST_SYMBOLS;
   }
@@ -1539,6 +1636,53 @@
       dot.style.background = color;
       dot.style.boxShadow = `0 0 6px ${color}`;
     }
+  }
+
+  function renderSymbolLoading(symbol){
+    const profile = profileForSymbol(symbol);
+    setText('#live-price', '-');
+    setText('#live-chg', 'Loading market data');
+    const label = qs('.price-display div');
+    if(label) label.textContent = profile.displayName || symbol;
+    setHtml('#status-reason', `<b>Loading ${escapeHtml(profile.indexName || profile.displayName || symbol)}.</b> Fetching ${escapeHtml(profile.dataSource === 'yahoo' ? 'Yahoo index' : profile.dataSource)} candles.`);
+    clearChart();
+    clearEntryCard();
+    renderMarketBrain({marketBrain:{
+      action:'WAIT',
+      finalDecision:'Loading',
+      playbook:'-',
+      confidence:0,
+      situation:'Waiting for fresh symbol data.',
+      nextTrigger:'Load candles before making a decision.',
+      warnings:['Old chart cleared while new data loads.']
+    }});
+  }
+
+  function clearChart(){
+    const svg = qs('svg.chart g#candles');
+    const axis = qs('#price-axis');
+    const marker = qs('#current-price-marker');
+    if(svg) svg.innerHTML = '';
+    if(axis) axis.innerHTML = '';
+    if(marker) marker.innerHTML = '';
+    chartScale = null;
+  }
+
+  function clearEntryCard(){
+    const card = qs('#signal-card');
+    if(!card) return;
+    const type = card.querySelector('.signal-type');
+    const hint = card.querySelector('.signal-hint');
+    const zone = card.querySelector('.zone-price');
+    const rr = card.querySelector('.rr-value');
+    const rrFill = card.querySelector('.rr-fill');
+    const values = card.querySelectorAll('.mini-value');
+    if(type) type.textContent = 'WAIT - Loading data';
+    if(hint) hint.textContent = 'Fresh candles are required before showing entry, TP, or invalidation.';
+    if(zone) zone.textContent = '-';
+    values.forEach(v => { v.textContent = '-'; });
+    if(rr) rr.textContent = '-';
+    if(rrFill) rrFill.style.width = '0%';
   }
 
   function renderDashboard(decision){
@@ -1700,7 +1844,13 @@
 
   function renderChart(candles){
     const svg = qs('svg.chart g#candles');
-    if(!svg || !candles.length) return;
+    if(!svg) return;
+    if(!candles.length){
+      clearChart();
+      const chartTitle = qs('.chart-header > span');
+      if(chartTitle) chartTitle.textContent = `Price Action - ${activeTimeframe}`;
+      return;
+    }
     const chartTitle = qs('.chart-header > span');
     if(chartTitle) chartTitle.textContent = `Price Action - ${activeTimeframe}`;
     const recent = candles.slice(-90);
@@ -1904,9 +2054,9 @@
   }
 
   function renderSignal(decision){
-    const card = qs('.signal-card');
+    const card = qs('#signal-card');
     if(!card) return;
-    const plan = displayTradePlan(decision);
+    const plan = displayActionableTradePlan(decision);
     const setup = displaySetup(decision);
     const type = card.querySelector('.signal-type');
     const icon = card.querySelector('.signal-header i');
@@ -1928,8 +2078,8 @@
       type.style.color = side === 'SHORT' ? 'var(--red)' : side === 'LONG' ? 'var(--green)' : 'var(--amber)';
     }
     if(icon){
-      icon.className = side === 'SHORT' ? 'ti ti-arrow-down' : 'ti ti-arrow-up';
-      icon.style.color = side === 'SHORT' ? 'var(--red)' : 'var(--green)';
+      icon.className = side === 'SHORT' ? 'ti ti-arrow-down' : side === 'LONG' ? 'ti ti-arrow-up' : 'ti ti-clock';
+      icon.style.color = side === 'SHORT' ? 'var(--red)' : side === 'LONG' ? 'var(--green)' : 'var(--amber)';
     }
     if(time) time.textContent = decision.tradeStatus.includes('COMMITTED') ? 'Committed' : isCommittableDecision(decision) ? `Ready ${decision.signalGrade.grade}` : 'Forming';
     if(clear) clear.style.display = decision.tradeStatus.includes('COMMITTED') ? 'inline-flex' : 'none';
@@ -1939,41 +2089,40 @@
         const aiVerdict = `AI ${ai.finalDecision} ${ai.bestDirection} (${fmt(ai.confidence, 0)}%): ${ai.nextTrigger}`;
         if(decision.aiAdvisor){
           hint.textContent = `${decision.aiAdvisor.primaryIdea}. ${aiVerdict} ${decision.aiAdvisor.mistakeWarning && decision.aiAdvisor.mistakeWarning[0] ? `Warning: ${decision.aiAdvisor.mistakeWarning[0]}` : ''}`;
-          return;
+        } else {
+          hint.textContent = aiVerdict;
         }
-        hint.textContent = aiVerdict;
-        return;
-      }
-      if(decision.aiAdvisor){
+      } else if(decision.aiAdvisor){
         hint.textContent = `${decision.aiAdvisor.primaryIdea}. ${((decision.aiAdvisor.nextBestActions || [])[0] || decision.aiAdvisor.summary)} ${decision.aiAdvisor.mistakeWarning && decision.aiAdvisor.mistakeWarning[0] ? `Warning: ${decision.aiAdvisor.mistakeWarning[0]}` : ''}`;
-        return;
+      } else {
+        const forecast = decision.nextStepForecast;
+        const targetNote = plan && plan.targetQuality ? ` Target quality: ${plan.targetQuality}. ${plan.targetWarning || ''}` : '';
+        const formation = displayFormationPlan(decision);
+        const early = decision.earlyTrigger;
+        hint.textContent = early && early.active
+          ? `${early.stage}: ${early.reasons.slice(0, 3).join('. ')}. ${formation && formation.tooLateRule ? formation.tooLateRule : ''}`
+          : formation && formation.side
+          ? `${formation.phase}: ${formation.context}. Trigger: ${formation.trigger}. ${formation.tooLateRule || ''}`
+          : forecast
+            ? `${forecast.expectation}. ${forecast.nextCandleMust}`
+            : (decision.nextConditionNeeded || decision.reason || ['Wait for confirmed setup.']).join(' ');
+        hint.textContent += targetNote;
       }
-      const forecast = decision.nextStepForecast;
-      const targetNote = plan && plan.targetQuality ? ` Target quality: ${plan.targetQuality}. ${plan.targetWarning || ''}` : '';
-      const formation = decision.formationPlan;
-      const early = decision.earlyTrigger;
-      hint.textContent = early && early.active
-        ? `${early.stage}: ${early.reasons.slice(0, 3).join('. ')}. ${formation && formation.tooLateRule ? formation.tooLateRule : ''}`
-        : formation && formation.side
-        ? `${formation.phase}: ${formation.context}. Trigger: ${formation.trigger}. ${formation.tooLateRule || ''}`
-        : forecast
-          ? `${forecast.expectation}. ${forecast.nextCandleMust}`
-          : (decision.nextConditionNeeded || decision.reason || ['Wait for confirmed setup.']).join(' ');
-      hint.textContent += targetNote;
     }
+    const formation = displayFormationPlan(decision);
     if(zone){
       if(plan && plan.entryZone){
         zone.textContent = planHasValidReward ? `${fmtPrice(plan.entryZone[0])} - ${fmtPrice(plan.entryZone[1])}` : 'NO ENTRY - TARGET TOO CLOSE';
-      } else if(decision.formationPlan && decision.formationPlan.earlyEntryZone){
-        zone.textContent = `${fmtPrice(decision.formationPlan.earlyEntryZone[0])} - ${fmtPrice(decision.formationPlan.earlyEntryZone[1])}`;
+      } else if(formation && formation.earlyEntryZone){
+        zone.textContent = `${fmtPrice(formation.earlyEntryZone[0])} - ${fmtPrice(formation.earlyEntryZone[1])}`;
       } else {
         zone.textContent = '-';
       }
     }
-    if(values[0]) values[0].textContent = plan ? (planHasValidReward ? fmtPrice(plan.takeProfit.tp1) : `Wait (${fmtPrice(plan.takeProfit.tp1)})`) : '-';
-    if(values[1]) values[1].textContent = plan ? fmtPrice(plan.invalidation) : decision.formationPlan && decision.formationPlan.invalidation ? fmtPrice(decision.formationPlan.invalidation) : '-';
-    if(values[2]) values[2].textContent = plan ? (planHasValidReward ? fmtPrice(plan.takeProfit.tp2) : `Wait (${fmtPrice(plan.takeProfit.tp2)})`) : '-';
-    if(values[3]) values[3].textContent = plan ? fmtPrice(plan.stopLoss) : decision.formationPlan && decision.formationPlan.invalidation ? fmtPrice(decision.formationPlan.invalidation) : '-';
+    if(values[0]) values[0].textContent = plan && plan.takeProfit ? (planHasValidReward ? fmtPrice(plan.takeProfit.tp1) : `Wait (${fmtPrice(plan.takeProfit.tp1)})`) : '-';
+    if(values[1]) values[1].textContent = plan ? fmtPrice(plan.invalidation) : formation && formation.invalidation ? fmtPrice(formation.invalidation) : '-';
+    if(values[2]) values[2].textContent = plan && plan.takeProfit ? (planHasValidReward ? fmtPrice(plan.takeProfit.tp2) : `Wait (${fmtPrice(plan.takeProfit.tp2)})`) : '-';
+    if(values[3]) values[3].textContent = plan ? fmtPrice(plan.stopLoss) : formation && formation.invalidation ? fmtPrice(formation.invalidation) : '-';
     if(rr) rr.textContent = plan ? `1:${fmt(plan.riskReward, 2)}` : '-';
     if(rrFill) rrFill.style.width = plan ? `${Math.min(100, plan.riskReward * 25)}%` : '0%';
   }
@@ -2647,7 +2796,7 @@
         refreshMarketData().catch(err => {
           console.error(err);
           setConnection('DATA ERROR', 'var(--red)');
-          setHtml('#status-reason', `<b>Data error.</b> ${escapeHtml(err.message)}. Keeping last rendered analysis.`);
+          setHtml('#status-reason', `<b>Data error.</b> ${escapeHtml(marketDataErrorHint(CONFIG.symbol, err))}. Keeping last rendered analysis.`);
         });
       }, CONFIG.refreshMs);
       watchlistTimer = setInterval(() => {
@@ -2656,7 +2805,7 @@
     } catch(err){
       console.error(err);
       setConnection('DATA ERROR', 'var(--red)');
-      setHtml('#status-reason', `<b>Data error.</b> ${escapeHtml(err.message)}. Check internet access or Binance availability.`);
+      setHtml('#status-reason', `<b>Data error.</b> ${escapeHtml(marketDataErrorHint(CONFIG.symbol, err))}.`);
     }
   }
 

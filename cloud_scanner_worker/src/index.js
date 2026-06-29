@@ -7,6 +7,14 @@ const SYMBOLS = [
 
 const TIMEFRAME = '15M';
 const BINANCE = 'https://api.binance.com/api/v3/klines';
+const YAHOO_INTERVALS = {
+  '1m': {interval:'1m', range:'1d'},
+  '5m': {interval:'5m', range:'5d'},
+  '15m': {interval:'15m', range:'5d'},
+  '1h': {interval:'60m', range:'1mo'},
+  '4h': {interval:'60m', range:'3mo', aggregate:4},
+  '1d': {interval:'1d', range:'1y'}
+};
 
 function json(data, status = 200){
   return new Response(JSON.stringify(data, null, 2), {
@@ -36,6 +44,62 @@ async function fetchKlines(symbol, interval, limit){
     x:Number(row[6]),
     isClosed:Number(row[6]) <= now
   })).filter(c => c.isClosed !== false);
+}
+
+function normalizeYahooChart(result, aggregate = 1){
+  const chart = result && result.chart && result.chart.result && result.chart.result[0];
+  if(!chart || !chart.timestamp || !chart.indicators || !chart.indicators.quote) throw new Error('Yahoo chart returned no candles');
+  const quote = chart.indicators.quote[0] || {};
+  const timestamps = chart.timestamp || [];
+  const rows = timestamps.map((ts, i) => ({
+    t:ts * 1000,
+    o:Number(quote.open && quote.open[i]),
+    h:Number(quote.high && quote.high[i]),
+    l:Number(quote.low && quote.low[i]),
+    c:Number(quote.close && quote.close[i]),
+    v:Number(quote.volume && quote.volume[i] || 0),
+    x:ts * 1000,
+    isClosed:true
+  })).filter(c => [c.o,c.h,c.l,c.c].every(Number.isFinite));
+  if(aggregate <= 1) return rows;
+  const grouped = [];
+  for(let i = 0; i < rows.length; i += aggregate){
+    const chunk = rows.slice(i, i + aggregate);
+    if(chunk.length < aggregate) continue;
+    grouped.push({
+      t:chunk[0].t,
+      o:chunk[0].o,
+      h:Math.max(...chunk.map(c => c.h)),
+      l:Math.min(...chunk.map(c => c.l)),
+      c:chunk[chunk.length - 1].c,
+      v:chunk.reduce((sum, c) => sum + (c.v || 0), 0),
+      x:chunk[chunk.length - 1].x,
+      isClosed:true
+    });
+  }
+  return grouped;
+}
+
+async function fetchYahooKlines(symbol, interval, limit){
+  const cfg = YAHOO_INTERVALS[interval] || YAHOO_INTERVALS['15m'];
+  const yahooSymbol = encodeURIComponent(symbol);
+  const path = `/v8/finance/chart/${yahooSymbol}?interval=${cfg.interval}&range=${cfg.range}&includePrePost=false`;
+  const urls = [
+    `https://query1.finance.yahoo.com${path}`,
+    `https://query2.finance.yahoo.com${path}`
+  ];
+  let lastError = null;
+  for(const url of urls){
+    try{
+      const res = await fetch(url, {headers:{'accept':'application/json'}});
+      if(!res.ok) throw new Error(`Yahoo ${res.status}`);
+      const rows = normalizeYahooChart(await res.json(), cfg.aggregate || 1);
+      if(rows.length) return rows.slice(-limit);
+    } catch(err){
+      lastError = err;
+    }
+  }
+  throw lastError || new Error(`${symbol} Yahoo unavailable`);
 }
 
 function signalSignature(symbol, decision){
@@ -213,6 +277,13 @@ export default {
     if(url.pathname === '/api/latest-signals'){
       return json({signals:await latestSignals(env, url.searchParams.get('limit'))});
     }
+    if(url.pathname === '/api/market-candles'){
+      const symbol = String(url.searchParams.get('symbol') || '').toUpperCase().trim();
+      const interval = String(url.searchParams.get('interval') || '15m').toLowerCase();
+      const limit = Math.max(5, Math.min(Number(url.searchParams.get('limit')) || 240, 500));
+      if(!symbol) return json({error:'symbol is required'}, 400);
+      return json({symbol, interval, candles:await fetchYahooKlines(symbol, interval, limit)});
+    }
     if(url.pathname === '/api/demo-state'){
       if(request.method === 'GET') return json({state:await getDemoState(env)});
       if(request.method === 'POST'){
@@ -222,6 +293,6 @@ export default {
       }
       return json({error:'Method not allowed'}, 405);
     }
-    return json({ok:true, service:'GoldPilot scanner', endpoints:['/api/scan','/api/latest-signals']});
+    return json({ok:true, service:'GoldPilot scanner', endpoints:['/api/scan','/api/latest-signals','/api/market-candles']});
   }
 };
