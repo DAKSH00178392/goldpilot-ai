@@ -19,6 +19,14 @@ const ALIASES = {
 };
 
 const ALLOWED_SYMBOLS = new Set(['^NSEI', '^NSEBANK', '^BSESN']);
+const NSE_INDEX_NAMES = {
+  '^NSEI':'NIFTY 50',
+  '^NSEBANK':'NIFTY BANK'
+};
+const BSE_INDEX_CODES = {
+  '^BSESN':16
+};
+const HISTORY_CACHE_URL = 'https://raw.githubusercontent.com/DAKSH00178392/goldpilot-ai/main/src/indian_market_cache.js';
 
 function corsHeaders(){
   return {
@@ -105,7 +113,7 @@ async function fetchYahooKlines(symbol, interval, limit){
   for(const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']){
     try{
       const jinaUrl = `https://r.jina.ai/http://${host}${path}`;
-      const res = await fetch(jinaUrl, {headers:{accept:'text/plain'}});
+      const res = await fetch(jinaUrl, {headers:{accept:'text/plain', 'x-no-cache':'true'}});
       if(!res.ok) throw new Error(`Jina Yahoo ${res.status}`);
       const rows = normalizeYahooChart(parseJinaYahooPayload(await res.text()), cfg.aggregate || 1);
       if(rows.length) return {source:'jina-yahoo-worker', candles:rows.slice(-limit)};
@@ -113,7 +121,119 @@ async function fetchYahooKlines(symbol, interval, limit){
       lastError = err;
     }
   }
+  const nseRows = await fetchNseLiveWithCachedHistory(symbol, interval, limit).catch(err => {
+    lastError = err;
+    return [];
+  });
+  if(nseRows.length) return {source:'nse-live-with-history', candles:nseRows};
+  const bseRows = await fetchBseLiveWithCachedHistory(symbol, interval, limit).catch(err => {
+    lastError = err;
+    return [];
+  });
+  if(bseRows.length) return {source:'bse-live-with-history', candles:bseRows};
   throw lastError || new Error(`${symbol} Yahoo candles unavailable`);
+}
+
+async function fetchNseLiveWithCachedHistory(symbol, interval, limit){
+  const indexName = NSE_INDEX_NAMES[symbol];
+  if(!indexName) return [];
+  const [quote, history] = await Promise.all([
+    fetchNseIndexQuote(indexName),
+    fetchCachedHistory(symbol, interval)
+  ]);
+  return mergeLiveQuoteWithHistory(quote, history, limit);
+}
+
+async function fetchBseLiveWithCachedHistory(symbol, interval, limit){
+  const indexCode = BSE_INDEX_CODES[symbol];
+  if(!indexCode) return [];
+  const [quote, history] = await Promise.all([
+    fetchBseIndexQuote(indexCode),
+    fetchCachedHistory(symbol, interval)
+  ]);
+  return mergeLiveQuoteWithHistory(quote, history, limit);
+}
+
+function mergeLiveQuoteWithHistory(quote, history, limit){
+  if(!quote || !history.length) return [];
+  const rows = history.slice(-limit).map(row => Object.assign({}, row, {isClosed:true, source:'history-cache'}));
+  const last = rows[rows.length - 1];
+  const liveTime = Date.now();
+  const open = Number(quote.open) || last.c;
+  const live = {
+    t:liveTime,
+    o:open,
+    h:Math.max(Number(quote.high) || open, Number(quote.last) || open),
+    l:Math.min(Number(quote.low) || open, Number(quote.last) || open),
+    c:Number(quote.last),
+    v:0,
+    x:liveTime,
+    isClosed:true,
+    source:'nse-live'
+  };
+  if(isFinite(live.c) && live.c > 0){
+    if(rows.length >= limit) rows.shift();
+    rows.push(live);
+  }
+  return rows;
+}
+
+async function fetchNseIndexQuote(indexName){
+  const res = await fetch('https://www.nseindia.com/api/allIndices', {
+    headers:{
+      accept:'application/json',
+      referer:'https://www.nseindia.com/',
+      'user-agent':'Mozilla/5.0'
+    }
+  });
+  if(!res.ok) throw new Error(`NSE ${res.status}`);
+  const data = await res.json();
+  const item = (data.data || []).find(row => String(row.index || '').toUpperCase() === indexName);
+  if(!item) throw new Error(`NSE quote missing ${indexName}`);
+  return {
+    last:Number(item.last),
+    open:Number(item.open),
+    high:Number(item.high),
+    low:Number(item.low)
+  };
+}
+
+async function fetchBseIndexQuote(indexCode){
+  const res = await fetch(`https://api.bseindia.com/BseIndiaAPI/api/IndexMovers/w?indexcode=${encodeURIComponent(indexCode)}`, {
+    headers:{
+      accept:'application/json',
+      referer:'https://www.bseindia.com/',
+      'user-agent':'Mozilla/5.0'
+    }
+  });
+  if(!res.ok) throw new Error(`BSE ${res.status}`);
+  const data = await res.json();
+  const item = data && data.Table && data.Table[0];
+  if(!item) throw new Error(`BSE quote missing ${indexCode}`);
+  return {
+    last:Number(item.LTP),
+    open:null,
+    high:null,
+    low:null
+  };
+}
+
+async function fetchCachedHistory(symbol, interval){
+  const res = await fetch(HISTORY_CACHE_URL, {headers:{accept:'text/plain'}});
+  if(!res.ok) throw new Error(`History cache ${res.status}`);
+  const text = await res.text();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if(start < 0 || end <= start) throw new Error('History cache payload missing');
+  const cache = JSON.parse(text.slice(start, end + 1));
+  const symbolCache = cache && cache.symbols && cache.symbols[symbol];
+  if(!symbolCache) return [];
+  const keys = interval === '1m' ? ['1m','5m','15m','1h','1d'] : [interval,'15m','5m','1h','1d'];
+  for(const key of keys){
+    const rows = Array.isArray(symbolCache[key]) ? symbolCache[key] : [];
+    if(rows.length >= 5) return rows;
+  }
+  return [];
 }
 
 export default {
