@@ -6,6 +6,8 @@
     refreshMs: 60000,
     candlesLimit: 240,
     cloudApiBase: '',
+    marketApiBase: '',
+    allowIndianCacheFallback: false,
     account: {
       balance: 1000,
       riskPct: 1,
@@ -315,11 +317,25 @@
     return !!cloudApiBase();
   }
 
+  function marketApiBase(){
+    const explicit = window.GOLDPILOT_MARKET_API_BASE
+      || localStorage.getItem('goldpilotMarketApiBase')
+      || window.GOLDPILOT_API_BASE
+      || localStorage.getItem('goldpilotCloudApiBase')
+      || CONFIG.marketApiBase
+      || CONFIG.cloudApiBase;
+    return explicit ? String(explicit).replace(/\/$/, '') : '';
+  }
+
+  function marketApiEnabled(){
+    return !!marketApiBase();
+  }
+
   function marketDataErrorHint(symbol, err){
     const profile = profileForSymbol(symbol);
     const reason = err && err.message ? err.message : String(err || 'Unknown data error');
-    if(profile.dataSource === 'yahoo' && !cloudApiEnabled()){
-      return `${reason}. Browser access to Yahoo can be blocked or rate-limited. Configure localStorage.goldpilotCloudApiBase or window.GOLDPILOT_API_BASE to your worker for /api/market-candles fallback; bundled Indian snapshot data is used when available.`;
+    if(profile.dataSource === 'yahoo' && !marketApiEnabled()){
+      return `${reason}. Indian index data needs the GoldPilot market-data worker because Yahoo blocks browser requests. Deploy indian_market_worker and set localStorage.goldpilotMarketApiBase to the worker URL.`;
     }
     return reason;
   }
@@ -331,6 +347,16 @@
       headers:{'content-type':'application/json'}
     }, options));
     if(!res.ok) throw new Error(`Cloud API ${res.status}`);
+    return res.json();
+  }
+
+  async function marketApi(path, options={}){
+    const base = marketApiBase();
+    if(!base) throw new Error('Market API base is not configured');
+    const res = await fetch(`${base}${path}`, Object.assign({
+      headers:{'content-type':'application/json'}
+    }, options));
+    if(!res.ok) throw new Error(`Market API ${res.status}`);
     return res.json();
   }
 
@@ -1235,11 +1261,23 @@
     const cfg = YAHOO_INTERVALS[interval] || YAHOO_INTERVALS['15m'];
     const yahooSymbol = encodeURIComponent(profile.yahooSymbol || symbol);
     const path = `/v8/finance/chart/${yahooSymbol}?interval=${cfg.interval}&range=${cfg.range}&includePrePost=false`;
+    let lastError = null;
+    if(marketApiEnabled()){
+      try{
+        const data = await marketApi(`/api/market-candles?symbol=${encodeURIComponent(profile.yahooSymbol || symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(limit)}`);
+        const rows = data && Array.isArray(data.candles) ? data.candles : [];
+        if(rows.length){
+          marketDataSourceMode = data.source === 'cache' ? 'cache' : 'worker';
+          return rows.slice(-limit);
+        }
+      } catch(err){
+        lastError = err;
+      }
+    }
     const urls = [
       `https://query1.finance.yahoo.com${path}`,
       `https://query2.finance.yahoo.com${path}`
     ];
-    let lastError = null;
     for(const url of urls){
       try{
         const rows = normalizeYahooChart(await fetchJson(url), cfg.aggregate || 1);
@@ -1248,16 +1286,8 @@
         lastError = err;
       }
     }
-    if(cloudApiEnabled()){
-      try{
-        const data = await cloudApi(`/api/market-candles?symbol=${encodeURIComponent(profile.yahooSymbol || symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(limit)}`);
-        const rows = data && Array.isArray(data.candles) ? data.candles : [];
-        if(rows.length) return rows.slice(-limit);
-      } catch(err){
-        lastError = err;
-      }
-    }
-    const cachedRows = cachedIndianKlines(profile.yahooSymbol || symbol, interval, limit);
+    const cacheAllowed = CONFIG.allowIndianCacheFallback === true || localStorage.getItem('goldpilotAllowCachedIndianData') === 'true';
+    const cachedRows = cacheAllowed ? cachedIndianKlines(profile.yahooSymbol || symbol, interval, limit) : [];
     if(cachedRows.length){
       marketDataSourceMode = 'cache';
       return cachedRows;

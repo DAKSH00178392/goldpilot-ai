@@ -142,6 +142,30 @@ https://goldpilot-scanner.<your-subdomain>.workers.dev/api/latest-signals
 
 Security note: `/api/scan` is open in this MVP for easy testing. Before serious use, protect it with a secret token or disable manual scan calls.
 
+Indian market live data
+
+The dashboard cannot fetch Yahoo Finance Indian index candles directly from the browser because Yahoo blocks cross-origin browser requests. For NIFTY, BANK NIFTY, and SENSEX, deploy the lightweight market-data worker. This worker does not need D1.
+
+```powershell
+cd indian_market_worker
+npx wrangler login
+npx wrangler deploy
+```
+
+After deploy, set the worker URL in the browser once:
+
+```js
+localStorage.setItem('goldpilotMarketApiBase', 'https://goldpilot-market-data.<your-subdomain>.workers.dev')
+```
+
+Then reload the dashboard and select `NIFTY 50`, `BANK NIFTY`, or `SENSEX`. The status should show `LIVE` or `PARTIAL DATA`, not `CACHED DATA`.
+
+Manual cache fallback is disabled by default. To temporarily use the bundled snapshot only when the live worker is unavailable:
+
+```js
+localStorage.setItem('goldpilotAllowCachedIndianData', 'true')
+```
+
 Risk settings
 
 The dashboard includes a Risk Engine settings form. It saves to `localStorage.goldpilotRiskSettings` and is used on every live engine refresh.

@@ -162,6 +162,8 @@ const connectorPath = path.join(__dirname, 'goldpilot_live_dashboard.js');
 const connectorJs = fs.readFileSync(connectorPath, 'utf8');
 const workerPath = path.join(__dirname, '..', 'cloud_scanner_worker', 'src', 'index.js');
 const workerJs = fs.readFileSync(workerPath, 'utf8');
+const indianWorkerPath = path.join(__dirname, '..', 'indian_market_worker', 'src', 'index.js');
+const indianWorkerJs = fs.readFileSync(indianWorkerPath, 'utf8');
 ok(connectorJs.includes('goldpilotRiskSettings'), 'live connector persists risk settings');
 ok(connectorJs.includes('requestOllamaAiDecision'), 'live connector can request structured Ollama AI decisions');
 ok(connectorJs.includes("format:'json'"), 'Ollama AI request asks for strict JSON output');
@@ -178,7 +180,9 @@ ok(connectorJs.includes('navigator.vibrate'), 'mobile alerts use vibration when 
 ok(connectorJs.includes('wireMobileAlerts'), 'live connector wires mobile alert permission control');
 ok(connectorJs.includes('refreshLiveNews'), 'live connector fetches live market news');
 ok(connectorJs.includes('/api/market-candles') && connectorJs.includes('marketDataErrorHint'), 'live connector has Indian market data proxy fallback guidance');
+ok(connectorJs.includes('marketApiBase') && connectorJs.includes('goldpilotMarketApiBase'), 'live connector has a dedicated Indian market data API base');
 ok(connectorJs.includes('cachedIndianKlines') && connectorJs.includes('GOLDPILOT_INDIAN_MARKET_CACHE'), 'live connector can fall back to bundled Indian market candles');
+ok(connectorJs.includes('goldpilotAllowCachedIndianData'), 'live connector only uses bundled Indian candles when cache fallback is explicitly enabled');
 ok(connectorJs.includes('CACHED DATA'), 'live connector labels bundled snapshot market data');
 ok(connectorJs.includes('normalizeMarketSymbol') && connectorJs.includes("SENSEX:'^BSESN'"), 'live connector normalizes Indian market aliases');
 ok(connectorJs.includes('renderSymbolLoading(next)') && connectorJs.includes('clearChart()'), 'live connector clears stale chart while switching symbols');
@@ -261,6 +265,8 @@ ok(connectorJs.includes('NO ENTRY - TARGET TOO CLOSE'), 'dashboard hides actiona
 ok(workerJs.includes('scheduled(event, env, ctx)'), 'cloud scanner worker has scheduled cron handler');
 ok(workerJs.includes('/api/latest-signals'), 'cloud scanner worker exposes latest signals API');
 ok(workerJs.includes('/api/market-candles'), 'cloud scanner worker exposes market candle proxy API');
+ok(indianWorkerJs.includes('/api/market-candles') && indianWorkerJs.includes('yahoo-worker'), 'standalone Indian market worker exposes live candle proxy API');
+ok(indianWorkerJs.includes('ALLOWED_SYMBOLS') && indianWorkerJs.includes('^BSESN'), 'standalone Indian market worker restricts supported index symbols');
 ok(workerJs.includes('committed_signals'), 'cloud scanner worker stores committed signals');
 ok(workerJs.includes('signalGrade.committable'), 'cloud scanner worker commits only graded signals');
 ok(workerJs.includes('/api/demo-state'), 'cloud scanner worker exposes shared demo state API');
