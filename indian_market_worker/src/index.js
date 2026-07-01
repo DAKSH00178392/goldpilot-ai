@@ -75,6 +75,14 @@ function normalizeYahooChart(result, aggregate = 1){
   return grouped;
 }
 
+function parseJinaYahooPayload(text){
+  const body = String(text || '');
+  const start = body.indexOf('{"chart"');
+  const end = body.lastIndexOf('}');
+  if(start < 0 || end <= start) throw new Error('Jina Yahoo snapshot returned no JSON chart payload');
+  return JSON.parse(body.slice(start, end + 1));
+}
+
 async function fetchYahooKlines(symbol, interval, limit){
   const cfg = YAHOO_INTERVALS[interval] || YAHOO_INTERVALS['15m'];
   const yahooSymbol = encodeURIComponent(symbol);
@@ -89,7 +97,18 @@ async function fetchYahooKlines(symbol, interval, limit){
       const res = await fetch(url, {headers:{accept:'application/json'}});
       if(!res.ok) throw new Error(`Yahoo ${res.status}`);
       const rows = normalizeYahooChart(await res.json(), cfg.aggregate || 1);
-      if(rows.length) return rows.slice(-limit);
+      if(rows.length) return {source:'yahoo-worker', candles:rows.slice(-limit)};
+    } catch(err){
+      lastError = err;
+    }
+  }
+  for(const host of ['query2.finance.yahoo.com', 'query1.finance.yahoo.com']){
+    try{
+      const jinaUrl = `https://r.jina.ai/http://${host}${path}`;
+      const res = await fetch(jinaUrl, {headers:{accept:'text/plain'}});
+      if(!res.ok) throw new Error(`Jina Yahoo ${res.status}`);
+      const rows = normalizeYahooChart(parseJinaYahooPayload(await res.text()), cfg.aggregate || 1);
+      if(rows.length) return {source:'jina-yahoo-worker', candles:rows.slice(-limit)};
     } catch(err){
       lastError = err;
     }
@@ -107,8 +126,8 @@ export default {
         const interval = String(url.searchParams.get('interval') || '15m').toLowerCase();
         const limit = Math.max(5, Math.min(Number(url.searchParams.get('limit')) || 240, 500));
         if(!ALLOWED_SYMBOLS.has(symbol)) return json({error:'unsupported Indian market symbol', symbol}, 400);
-        const candles = await fetchYahooKlines(symbol, interval, limit);
-        return json({symbol, interval, source:'yahoo-worker', candles});
+        const data = await fetchYahooKlines(symbol, interval, limit);
+        return json({symbol, interval, source:data.source, candles:data.candles});
       }
       return json({
         ok:true,

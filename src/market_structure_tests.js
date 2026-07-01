@@ -270,6 +270,7 @@ ok(workerJs.includes('/api/latest-signals'), 'cloud scanner worker exposes lates
 ok(workerJs.includes('/api/market-candles'), 'cloud scanner worker exposes market candle proxy API');
 ok(indianWorkerJs.includes('/api/market-candles') && indianWorkerJs.includes('yahoo-worker'), 'standalone Indian market worker exposes live candle proxy API');
 ok(indianWorkerJs.includes('ALLOWED_SYMBOLS') && indianWorkerJs.includes('^BSESN'), 'standalone Indian market worker restricts supported index symbols');
+ok(indianWorkerJs.includes('r.jina.ai') && indianWorkerJs.includes('jina-yahoo-worker'), 'standalone Indian market worker has fallback when Yahoo rate-limits worker requests');
 ok(workerJs.includes('committed_signals'), 'cloud scanner worker stores committed signals');
 ok(workerJs.includes('signalGrade.committable'), 'cloud scanner worker commits only graded signals');
 ok(workerJs.includes('/api/demo-state'), 'cloud scanner worker exposes shared demo state API');
