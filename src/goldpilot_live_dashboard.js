@@ -310,7 +310,7 @@
   function cloudApiBase(){
     const explicit = window.GOLDPILOT_API_BASE || localStorage.getItem('goldpilotCloudApiBase') || CONFIG.cloudApiBase;
     if(explicit) return String(explicit).replace(/\/$/, '');
-    return location.protocol.indexOf('http') === 0 ? location.origin : '';
+    return '';
   }
 
   function cloudApiEnabled(){
@@ -324,11 +324,25 @@
       || localStorage.getItem('goldpilotCloudApiBase')
       || CONFIG.marketApiBase
       || CONFIG.cloudApiBase;
-    return explicit ? String(explicit).replace(/\/$/, '') : '';
+    if(explicit) return String(explicit).replace(/\/$/, '');
+    return inferredWorkersDevBase('goldpilot-market-data');
   }
 
   function marketApiEnabled(){
     return !!marketApiBase();
+  }
+
+  function inferredWorkersDevBase(workerName){
+    if(!location || !/\.workers\.dev$/i.test(location.hostname)) return '';
+    const parts = location.hostname.split('.');
+    if(parts.length < 4) return '';
+    const subdomain = parts[1];
+    if(!subdomain || parts[0] === workerName) return location.origin;
+    return `https://${workerName}.${subdomain}.workers.dev`;
+  }
+
+  function shouldTryDirectYahoo(){
+    return false;
   }
 
   function marketDataErrorHint(symbol, err){
@@ -1278,12 +1292,14 @@
       `https://query1.finance.yahoo.com${path}`,
       `https://query2.finance.yahoo.com${path}`
     ];
-    for(const url of urls){
-      try{
-        const rows = normalizeYahooChart(await fetchJson(url), cfg.aggregate || 1);
-        if(rows.length) return rows.slice(-limit);
-      } catch(err){
-        lastError = err;
+    if(shouldTryDirectYahoo()){
+      for(const url of urls){
+        try{
+          const rows = normalizeYahooChart(await fetchJson(url), cfg.aggregate || 1);
+          if(rows.length) return rows.slice(-limit);
+        } catch(err){
+          lastError = err;
+        }
       }
     }
     const cacheAllowed = CONFIG.allowIndianCacheFallback === true || localStorage.getItem('goldpilotAllowCachedIndianData') === 'true';

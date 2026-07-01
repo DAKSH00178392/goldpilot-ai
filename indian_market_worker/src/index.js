@@ -99,20 +99,24 @@ async function fetchYahooKlines(symbol, interval, limit){
 
 export default {
   async fetch(request){
-    const url = new URL(request.url);
-    if(request.method === 'OPTIONS') return new Response(null, {status:204, headers:corsHeaders()});
-    if(url.pathname === '/api/market-candles'){
-      const symbol = normalizeSymbol(url.searchParams.get('symbol'));
-      const interval = String(url.searchParams.get('interval') || '15m').toLowerCase();
-      const limit = Math.max(5, Math.min(Number(url.searchParams.get('limit')) || 240, 500));
-      if(!ALLOWED_SYMBOLS.has(symbol)) return json({error:'unsupported Indian market symbol', symbol}, 400);
-      const candles = await fetchYahooKlines(symbol, interval, limit);
-      return json({symbol, interval, source:'yahoo-worker', candles});
+    try{
+      const url = new URL(request.url);
+      if(request.method === 'OPTIONS') return new Response(null, {status:204, headers:corsHeaders()});
+      if(url.pathname === '/api/market-candles'){
+        const symbol = normalizeSymbol(url.searchParams.get('symbol'));
+        const interval = String(url.searchParams.get('interval') || '15m').toLowerCase();
+        const limit = Math.max(5, Math.min(Number(url.searchParams.get('limit')) || 240, 500));
+        if(!ALLOWED_SYMBOLS.has(symbol)) return json({error:'unsupported Indian market symbol', symbol}, 400);
+        const candles = await fetchYahooKlines(symbol, interval, limit);
+        return json({symbol, interval, source:'yahoo-worker', candles});
+      }
+      return json({
+        ok:true,
+        service:'GoldPilot Indian market data',
+        endpoints:['/api/market-candles?symbol=^NSEI&interval=15m&limit=240']
+      });
+    } catch(err){
+      return json({error:err && err.message ? err.message : String(err || 'Worker error')}, 500);
     }
-    return json({
-      ok:true,
-      service:'GoldPilot Indian market data',
-      endpoints:['/api/market-candles?symbol=^NSEI&interval=15m&limit=240']
-    });
   }
 };

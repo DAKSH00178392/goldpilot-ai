@@ -181,6 +181,9 @@ ok(connectorJs.includes('wireMobileAlerts'), 'live connector wires mobile alert 
 ok(connectorJs.includes('refreshLiveNews'), 'live connector fetches live market news');
 ok(connectorJs.includes('/api/market-candles') && connectorJs.includes('marketDataErrorHint'), 'live connector has Indian market data proxy fallback guidance');
 ok(connectorJs.includes('marketApiBase') && connectorJs.includes('goldpilotMarketApiBase'), 'live connector has a dedicated Indian market data API base');
+ok(connectorJs.includes("inferredWorkersDevBase('goldpilot-market-data')"), 'live connector auto-detects the Indian market worker on workers.dev deployments');
+ok(connectorJs.includes('function cloudApiBase()') && connectorJs.includes("return '';"), 'live connector does not assume the dashboard origin exposes cloud demo APIs');
+ok(connectorJs.includes('shouldTryDirectYahoo') && connectorJs.includes('return false;'), 'live connector avoids browser Yahoo CORS requests for Indian index candles');
 ok(connectorJs.includes('cachedIndianKlines') && connectorJs.includes('GOLDPILOT_INDIAN_MARKET_CACHE'), 'live connector can fall back to bundled Indian market candles');
 ok(connectorJs.includes('goldpilotAllowCachedIndianData'), 'live connector only uses bundled Indian candles when cache fallback is explicitly enabled');
 ok(connectorJs.includes('CACHED DATA'), 'live connector labels bundled snapshot market data');
