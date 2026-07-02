@@ -639,6 +639,11 @@ body{
 .brain-list{display:flex;flex-direction:column;gap:5px;margin-top:8px}
 .brain-line{font-size:11px;color:var(--text2);line-height:1.45}
 .brain-line b{color:var(--text);font-weight:600}
+.brain-source{font-size:10px;color:var(--text3);font-family:'DM Mono',monospace;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px}
+.ai-prob-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}
+.ai-prob{border:1px solid var(--border);background:rgba(255,255,255,.025);padding:6px;border-radius:5px}
+.ai-prob span{display:block;font-size:9px;color:var(--text3);font-family:'DM Mono',monospace;text-transform:uppercase;margin-bottom:3px}
+.ai-prob b{font-size:12px;color:var(--text);font-family:'DM Mono',monospace}
 .signal-header{gap:8px}
 .signal-type{font-size:12px}
 .signal-time{
@@ -1013,6 +1018,7 @@ body[data-page="Settings"] .right-col{grid-template-columns:minmax(320px,520px) 
       <div class="panel" id="brain-panel">
         <div class="panel-title"><i class="ti ti-brain" aria-hidden="true"></i>Market Brain</div>
         <div class="signal-card brain-card">
+          <div class="brain-source" id="brain-source">Engine brain</div>
           <div class="brain-row">
             <div>
               <div class="brain-title" id="brain-final">Waiting for market context</div>
@@ -1022,6 +1028,11 @@ body[data-page="Settings"] .right-col{grid-template-columns:minmax(320px,520px) 
           </div>
           <div class="brain-meter"><div class="brain-meter-fill" id="brain-confidence-fill"></div></div>
           <div class="brain-sub" id="brain-confidence">Confidence 0%</div>
+          <div class="ai-prob-grid" id="ai-prob-grid" style="display:none">
+            <div class="ai-prob"><span>Long</span><b id="ai-prob-long">0%</b></div>
+            <div class="ai-prob"><span>Short</span><b id="ai-prob-short">0%</b></div>
+            <div class="ai-prob"><span>Wait</span><b id="ai-prob-wait">0%</b></div>
+          </div>
           <div class="brain-list">
             <div class="brain-line"><b>Situation:</b> <span id="brain-situation">-</span></div>
             <div class="brain-line"><b>Discipline:</b> <span id="brain-discipline">-</span></div>
@@ -1208,9 +1219,9 @@ body[data-page="Settings"] .right-col{grid-template-columns:minmax(320px,520px) 
         </div>
       </div>
 
-      <!-- SETUP CHECKLIST -->
+      <!-- ENGINE EVIDENCE -->
       <div class="panel" id="checklist-panel" style="flex:1">
-        <div class="panel-title"><i class="ti ti-list-check" aria-hidden="true"></i>Setup checklist</div>
+        <div class="panel-title"><i class="ti ti-list-check" aria-hidden="true"></i>Engine evidence</div>
         <div id="checklist"></div>
       </div>
 
@@ -1426,6 +1437,21 @@ document.querySelectorAll('.tf').forEach(t=>{
   });
 });
 </script>
+<script src="src/brain_library/register.js"></script>
+<script src="src/brain_library/philosophy.js"></script>
+<script src="src/brain_library/market_structure.js"></script>
+<script src="src/brain_library/liquidity.js"></script>
+<script src="src/brain_library/concepts.js"></script>
+<script src="src/brain_library/indicators.js"></script>
+<script src="src/brain_library/psychology.js"></script>
+<script src="src/brain_library/situations.js"></script>
+<script src="src/brain_library/playbooks.js"></script>
+<script src="src/brain_library/hybrid_strategies.js"></script>
+<script src="src/brain_library/indian_markets.js"></script>
+<script src="src/brain_library/crypto_gold.js"></script>
+<script src="src/brain_library/risk.js"></script>
+<script src="src/brain_library/memory.js"></script>
+<script src="src/brain_library.js"></script>
 <script src="src/trading_engines.js"></script>
 <script src="src/indian_market_cache.js"></script>
 <script src="src/goldpilot_live_dashboard.js"></script>

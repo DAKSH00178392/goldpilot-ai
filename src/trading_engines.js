@@ -1838,7 +1838,7 @@
     };
   }
 
-  const BRAIN_LIBRARY = {
+  const DEFAULT_BRAIN_LIBRARY = {
     philosophy:[
       {id:'CAPITAL_FIRST', label:'Protect capital first', rule:'If risk, session, volatility, or news is bad, the best decision is no trade.'},
       {id:'NO_CHASE', label:'No chase entries', rule:'If price already moved away from the decision zone, wait for retest.'},
@@ -1866,6 +1866,28 @@
       'Block revenge trades after daily loss limit'
     ]
   };
+  const BRAIN_LIBRARY = mergeBrainLibrary(DEFAULT_BRAIN_LIBRARY, typeof globalThis !== 'undefined' ? globalThis.GoldPilotBrainLibrary : null);
+
+  function mergeBrainLibrary(base, extra){
+    if(!extra) return base;
+    return {
+      philosophy:[...(base.philosophy || []), ...(extra.philosophy || [])],
+      situations:[...(base.situations || []), ...(extra.situations || [])],
+      memoryHooks:[...(base.memoryHooks || []), ...(extra.memoryPatterns || [])],
+      concepts:extra.concepts || [],
+      indicators:extra.indicators || [],
+      tradingPhilosophies:extra.tradingPhilosophies || [],
+      marketStructure:extra.marketStructure || [],
+      liquidity:extra.liquidity || [],
+      psychology:extra.psychology || [],
+      tactics:extra.tactics || [],
+      hybridStrategies:extra.hybridStrategies || [],
+      marketRules:extra.marketRules || {},
+      marketPersonality:extra.marketPersonality || {},
+      riskRules:extra.riskRules || [],
+      mixRules:extra.mixRules || []
+    };
+  }
 
   const MARKET_PLAYBOOKS = [
     {
@@ -2089,6 +2111,269 @@
     };
   }
 
+  function synthesizeAdaptiveBrainStrategy(ctx, decision, situation, rankedPlaybooks, philosophy, executionQuality, plan, risk){
+    const tactics = BRAIN_LIBRARY.tactics || [];
+    const hybridStrategies = BRAIN_LIBRARY.hybridStrategies || [];
+    const concepts = BRAIN_LIBRARY.concepts || [];
+    const indicators = BRAIN_LIBRARY.indicators || [];
+    const psychology = BRAIN_LIBRARY.psychology || [];
+    const tradingPhilosophies = BRAIN_LIBRARY.tradingPhilosophies || [];
+    const marketStructure = BRAIN_LIBRARY.marketStructure || [];
+    const liquidityKnowledge = BRAIN_LIBRARY.liquidity || [];
+    const riskRules = BRAIN_LIBRARY.riskRules || [];
+    const mixRules = BRAIN_LIBRARY.mixRules || [];
+    const marketRules = (BRAIN_LIBRARY.marketRules && BRAIN_LIBRARY.marketRules[ctx.marketType]) || [];
+    const personality = (BRAIN_LIBRARY.marketPersonality && BRAIN_LIBRARY.marketPersonality[ctx.symbol]) || [];
+    const tags = situation.tags || [];
+    const conceptMatches = concepts.filter(concept => {
+      const text = [
+        concept.id,
+        concept.definition,
+        ...(concept.evidence || []),
+        ...(concept.requiredConfirmation || [])
+      ].join(' ').toLowerCase();
+      const setupText = `${(ctx.setup && ctx.setup.setup) || ''} ${(ctx.regime && ctx.regime.regime) || ''} ${tags.join(' ')}`.toLowerCase();
+      return /liquidity|sweep|reclaim/.test(text) && /liquidity|sweep|reversal|trap/.test(setupText)
+        || /bos|structure/.test(text) && /bos|continuation|structure/.test(setupText)
+        || /compression|expansion/.test(text) && tags.includes('COMPRESSION')
+        || /premium|discount|location/.test(text) && ctx.setup && ctx.setup.locationOk === false
+        || /failed|auction|breakout/.test(text) && /trap|range|failed|breakout/.test(setupText)
+        || /round|magnet|target/.test(text) && /liquidity|target|round/.test(setupText)
+        || /time|session/.test(text) && /OPENING_DRIVE|MIDDAY_CHOP|GAP/.test(tags.join(' '));
+    }).slice(0, 4);
+    const indicatorMatches = indicators.filter(indicator => {
+      const id = indicator.id || '';
+      return id === 'ATR'
+        || id === 'VOLUME_EXPANSION' && ctx.volume && ctx.volume.score >= 55
+        || id === 'EMA_SLOPE' && ctx.trend && ctx.trend.score >= 55
+        || id === 'OPENING_RANGE' && tags.includes('OPENING_DRIVE')
+        || id === 'RSI_DIVERGENCE' && tags.includes('LIQUIDITY_REVERSAL');
+    }).slice(0, 4);
+    const psychologyMatches = psychology.filter(item => {
+      const clue = [...(item.marketClue || []), item.id, item.meaning].join(' ').toLowerCase();
+      const setupText = `${(ctx.setup && ctx.setup.setup) || ''} ${(ctx.regime && ctx.regime.regime) || ''} ${tags.join(' ')}`.toLowerCase();
+      return /fomo|late|extended/.test(clue) && /late|extended|target/.test(setupText)
+        || /trapped|panic|capitulation/.test(clue) && /sweep|trap|reversal|liquidity/.test(setupText)
+        || /greed|fear/.test(clue) && /choppy|range|trap/.test(setupText);
+    }).slice(0, 3);
+    const philosophyMatches = tradingPhilosophies.filter(item => {
+      const text = `${item.id} ${item.core} ${item.brainUse}`.toLowerCase();
+      return /wyckoff|auction|market_profile/.test(text) && tags.includes('RANGE_DAY')
+        || /smart_money|liquidity/.test(text) && conceptMatches.some(c => /LIQUIDITY|ORDER_BLOCK|FVG/.test(c.id))
+        || /trend/.test(text) && tags.includes('TREND_DAY')
+        || /mean/.test(text) && tags.includes('LIQUIDITY_REVERSAL')
+        || /price_action|volume/.test(text);
+    }).slice(0, 4);
+    const candidates = tactics.map(tactic => {
+      let score = 35;
+      const needsText = (tactic.needs || []).join(' ').toLowerCase();
+      if(/sweep|reclaim|liquidity/.test(needsText) && /sweep|liquidity|reversal/i.test((ctx.setup && ctx.setup.setup) || '')) score += 24;
+      if(/structure|choch|shift/.test(needsText) && decision.entryTrigger && decision.entryTrigger.ready) score += 18;
+      if(/retest|pullback|acceptance|mitigation/.test(needsText) && ctx.retestOk) score += 18;
+      if(/volume/.test(needsText) && ctx.volume && ctx.volume.score >= 55) score += 12;
+      if(/bias|target/.test(needsText) && ctx.bias && ctx.bias.bias !== 'Neutral') score += 10;
+      if(/gap/.test(needsText) && tags.includes('GAP_DAY')) score += 16;
+      if(/failed|breakout/.test(needsText) && tags.includes('RANGE_DAY')) score += 12;
+      if(/extended|exhaustion|divergence/.test(needsText) && tags.includes('LIQUIDITY_REVERSAL')) score += 12;
+      if(tactic.id === 'NO_TRADE_FILTER' && (philosophy.hardBlock || executionQuality.score < 48 || tags.includes('NEWS_DAY'))) score += 40;
+      if(tactic.id !== 'NO_TRADE_FILTER' && philosophy.hardBlock) score -= 45;
+      return Object.assign({}, tactic, {score:Math.round(clamp(score, 0, 100))});
+    }).sort((a,b) => b.score - a.score);
+
+    const activeIds = new Set([
+      ...tags,
+      ...candidates.slice(0, 3).map(t => t.id),
+      ...conceptMatches.map(c => c.id),
+      ...indicatorMatches.map(i => i.id),
+      ...psychologyMatches.map(p => p.id),
+      ...philosophyMatches.map(p => p.id),
+      ...(rankedPlaybooks || []).slice(0, 2).map(p => p.id)
+    ]);
+    const blend = mixRules.find(rule => (rule.use || []).filter(id => activeIds.has(id)).length >= 2) || null;
+    const hybridRankings = hybridStrategies.map(strategy => {
+      const comboHits = (strategy.combines || []).filter(id => activeIds.has(id)).length;
+      const conditionHits = (strategy.marketCondition || []).filter(id => activeIds.has(id) || tags.includes(id)).length;
+      const avoidText = (strategy.avoidWhen || []).join(' ').toLowerCase();
+      let score = 28 + comboHits * 12 + conditionHits * 14;
+      if(plan && risk && risk.allowed) score += 8;
+      if(executionQuality.score >= 52) score += 6;
+      if(/late|chase/.test(avoidText) && ctx.crypto && ctx.crypto.chaseRisk) score -= 22;
+      if(philosophy.hardBlock) score -= 45;
+      return Object.assign({}, strategy, {
+        score:Math.round(clamp(score, 0, 100)),
+        comboHits,
+        conditionHits
+      });
+    }).filter(strategy => strategy.comboHits >= 2 || strategy.conditionHits >= 1)
+      .sort((a,b) => b.score - a.score);
+    const bestHybrid = hybridRankings[0] || null;
+    const bestTactic = candidates[0] || null;
+    const bestPlaybook = rankedPlaybooks && rankedPlaybooks[0];
+    const evidenceScore = Math.round(clamp(
+      executionQuality.score * 0.32
+      + ((bestPlaybook && bestPlaybook.score) || 0) * 0.24
+      + ((bestTactic && bestTactic.score) || 0) * 0.18
+      + ((bestHybrid && bestHybrid.score) || 0) * 0.16
+      + ((decision.masterScore && decision.masterScore.score) || 0) * 0.1,
+      0,
+      100
+    ));
+    const hasPlan = !!(plan && risk && risk.allowed);
+    const danger = philosophy.hardBlock || (ctx.crypto && ctx.crypto.chaseRisk) || (risk && risk.allowed === false);
+    const strongLibraryContext = !!(
+      blend
+      || bestHybrid && bestHybrid.score >= 68
+      || conceptMatches.length >= 2
+      || psychologyMatches.length >= 1 && conceptMatches.length >= 1
+      || (bestTactic && bestTactic.score >= 70 && bestPlaybook && bestPlaybook.score >= 60)
+    );
+    const contextOpportunity = hasPlan
+      && !danger
+      && strongLibraryContext
+      && executionQuality.score >= 52
+      && evidenceScore >= (bestHybrid ? Math.min(70, bestHybrid.commitScore - 8) : 68)
+      && plan.riskReward >= CONFIG.minRiskReward
+      && !(ctx.marketType === 'indian_index' && ctx.session === 'India Open Drive' && !decision.entryTrigger.ready);
+    const standardConfirmation = hasPlan
+      && !danger
+      && executionQuality.score >= 68
+      && evidenceScore >= ((bestTactic && bestTactic.commitScore) || 76)
+      && !(ctx.marketType === 'indian_index' && ctx.session === 'India Open Drive' && !decision.entryTrigger.ready);
+    const canCommit = standardConfirmation || contextOpportunity;
+    const verdict = danger ? 'BLOCK'
+      : canCommit ? 'COMMIT'
+        : hasPlan && (evidenceScore >= 66 || strongLibraryContext && executionQuality.score >= 48) ? 'ALERT'
+          : 'WAIT';
+    const decisionMode = danger ? 'RISK_BLOCK'
+      : standardConfirmation ? 'STANDARD_CONFIRMATION'
+        : contextOpportunity ? 'HYBRID_CONTEXT_OPPORTUNITY'
+          : verdict === 'ALERT' ? 'HYBRID_ALERT'
+            : 'OBSERVE';
+    const generatedStrategy = generateLiveStrategy({
+      ctx,
+      decision,
+      situation,
+      verdict,
+      decisionMode,
+      evidenceScore,
+      bestHybrid,
+      bestTactic,
+      bestPlaybook,
+      blend,
+      conceptMatches,
+      indicatorMatches,
+      psychologyMatches,
+      philosophyMatches,
+      marketRules,
+      personality,
+      plan,
+      risk
+    });
+    return {
+      verdict,
+      canCommit,
+      decisionMode,
+      evidenceScore,
+      standardConfirmation,
+      contextOpportunity,
+      strongLibraryContext,
+      bestHybrid,
+      generatedStrategy,
+      hybridRankings:hybridRankings.slice(0, 3),
+      bestTactic,
+      blend,
+      marketRules:marketRules.slice(0, 3),
+      conceptMatches:conceptMatches.map(c => c.id),
+      indicatorMatches:indicatorMatches.map(i => i.id),
+      psychologyMatches:psychologyMatches.map(p => p.id),
+      philosophyMatches:philosophyMatches.map(p => p.id),
+      structureKnowledge:marketStructure.map(s => s.id).slice(0, 8),
+      liquidityKnowledge:liquidityKnowledge.map(l => l.id).slice(0, 8),
+      riskRules:riskRules.map(r => r.id).slice(0, 5),
+      personality:personality.slice(0, 3),
+      libraryUsed:[
+        bestHybrid ? bestHybrid.name : null,
+        bestTactic ? bestTactic.name : null,
+        blend ? blend.id : null,
+        bestPlaybook ? bestPlaybook.name : null,
+        conceptMatches[0] ? conceptMatches[0].id : null,
+        indicatorMatches[0] ? indicatorMatches[0].id : null,
+        psychologyMatches[0] ? psychologyMatches[0].id : null,
+        philosophyMatches[0] ? philosophyMatches[0].name : null
+      ].filter(Boolean),
+      reasoning: blend ? blend.result
+        : bestHybrid ? `${bestHybrid.name}: ${bestHybrid.decision}`
+        : bestTactic ? `${bestTactic.name}: ${(bestTactic.needs || []).join(', ')}`
+          : 'No strong library tactic matched; stay in observation mode.'
+    };
+  }
+
+  function generateLiveStrategy(input){
+    const plan = input.plan;
+    const direction = plan ? plan.side : input.decision.preferredDirection || input.decision.nextStepForecast && input.decision.nextStepForecast.leadDirection || 'WAIT';
+    const sourceKnowledge = [
+      ...(input.bestHybrid && input.bestHybrid.combines || []),
+      ...(input.conceptMatches || []).map(x => x.id),
+      ...(input.indicatorMatches || []).map(x => x.id),
+      ...(input.psychologyMatches || []).map(x => x.id),
+      ...(input.philosophyMatches || []).map(x => x.id),
+      input.bestTactic && input.bestTactic.id,
+      input.bestPlaybook && input.bestPlaybook.id
+    ].filter(Boolean);
+    const uniqueKnowledge = [...new Set(sourceKnowledge)].slice(0, 12);
+    const situationLabel = input.situation && input.situation.label || 'Unclassified market';
+    const strategyType = /REVERSAL|SWEEP|FADE|EXHAUSTION|TRAP/i.test(uniqueKnowledge.join(' ')) ? 'reversal'
+      : /TREND|BOS|MITIGATION|RETEST|CONTINUATION/i.test(uniqueKnowledge.join(' ')) ? 'continuation'
+        : /OPEN|GAP/i.test(uniqueKnowledge.join(' ')) ? 'session-reaction'
+          : 'adaptive';
+    const marketName = input.ctx.symbol || input.ctx.marketType || 'Market';
+    const baseName = input.bestHybrid ? input.bestHybrid.name
+      : input.blend ? input.blend.id.replace(/_/g, ' ').toLowerCase()
+        : input.bestTactic ? input.bestTactic.name
+          : 'Generated adaptive strategy';
+    const name = `${marketName} ${strategyType} - ${baseName}`;
+    const entryLogic = input.bestHybrid && input.bestHybrid.entryLogic
+      ? input.bestHybrid.entryLogic.slice(0, 5)
+      : input.bestTactic && input.bestTactic.needs
+        ? input.bestTactic.needs.map(need => `Confirm ${need}`).slice(0, 5)
+        : ['Wait for library context to align', 'Confirm price reaction', 'Enter only if risk remains valid'];
+    const avoidWhen = [
+      ...(input.bestHybrid && input.bestHybrid.avoidWhen || []),
+      ...(input.marketRules || []).slice(0, 2),
+      ...(input.risk && input.risk.reasons || []).slice(0, 2)
+    ].filter(Boolean).slice(0, 6);
+    const invalidation = plan ? `Invalidation ${round(plan.stopLoss, priceDigits(plan.stopLoss))}` : input.bestHybrid && input.bestHybrid.invalidation || 'No trade until invalidation is defined';
+    const targetLogic = plan && plan.takeProfit
+      ? `Primary target ${round(plan.takeProfit.tp1, priceDigits(plan.takeProfit.tp1))}; use real market targets before fixed R:R`
+      : 'Define target from opposing liquidity or value before commit';
+    return {
+      id:`LIVE_SYNTH_${Math.abs(hashString([marketName, name, uniqueKnowledge.join('|'), strategyType].join('|'))).toString(36).toUpperCase()}`,
+      name,
+      strategyType,
+      direction,
+      sourceKnowledge:uniqueKnowledge,
+      marketRead:`${situationLabel}: ${(input.situation && input.situation.reasons || [])[0] || 'strategy generated from current market evidence.'}`,
+      entryLogic,
+      invalidation,
+      targetLogic,
+      avoidWhen,
+      decision:input.verdict,
+      decisionMode:input.decisionMode,
+      confidence:input.evidenceScore,
+      createdFrom:input.bestHybrid ? 'hybrid-template-plus-live-context' : 'live-library-synthesis'
+    };
+  }
+
+  function hashString(text){
+    let hash = 0;
+    const raw = String(text || '');
+    for(let i=0; i<raw.length; i++){
+      hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+      hash |= 0;
+    }
+    return hash;
+  }
+
   function buildMarketBrain(decision, candles, context){
     const setup = decision.setup || {};
     const plan = decision.tradePlan;
@@ -2122,6 +2407,7 @@
     const situation = classifyBrainSituation(playbookContext, decision);
     const philosophy = evaluateBrainPhilosophy(playbookContext, decision, plan, risk);
     const executionQuality = evaluateExecutionQuality(decision, plan, playbookContext);
+    const adaptive = synthesizeAdaptiveBrainStrategy(playbookContext, decision, situation, rankedPlaybooks, philosophy, executionQuality, plan, risk);
     const warnings = [];
     const evidence = [];
     let playbook = 'No-trade filter';
@@ -2154,10 +2440,14 @@
       playbook = decision.cryptoContext.isIndianIndex ? 'Index whipsaw filter' : 'Impulse chase filter';
       warnings.push(...(decision.cryptoContext.warnings || ['Market is moving too aggressively to chase']).slice(0, 3));
       confidence = Math.min(confidence, 68);
-    } else if(signal.committable && plan && risk.allowed){
+    } else if(adaptive.verdict === 'COMMIT'){
       action = 'DEMO_READY';
-      playbook = bestPlaybook ? bestPlaybook.name : setup.setup || 'Confirmed execution setup';
-      confidence = Math.max(confidence, 78);
+      playbook = adaptive.bestHybrid ? adaptive.bestHybrid.name : adaptive.blend ? adaptive.blend.id : bestPlaybook ? bestPlaybook.name : adaptive.bestTactic ? adaptive.bestTactic.name : setup.setup || 'Adaptive execution setup';
+      confidence = Math.max(confidence, adaptive.evidenceScore, 78);
+    } else if(adaptive.verdict === 'ALERT'){
+      action = 'ALERT';
+      playbook = adaptive.bestHybrid ? adaptive.bestHybrid.name : adaptive.blend ? adaptive.blend.id : adaptive.bestTactic ? adaptive.bestTactic.name : bestPlaybook ? bestPlaybook.name : 'Adaptive watch';
+      confidence = Math.max(confidence, adaptive.evidenceScore);
     } else if(early.ready && early.tradePlan){
       action = 'ALERT';
       playbook = 'Early liquidity reaction';
@@ -2179,12 +2469,16 @@
     evidence.push(`Situation: ${situation.label}`);
     evidence.push(`Execution: ${executionQuality.label} ${executionQuality.score}`);
     if(bestPlaybook) evidence.push(`Best playbook: ${bestPlaybook.name} (${bestPlaybook.score})`);
+    if(adaptive.generatedStrategy) evidence.push(`Generated strategy: ${adaptive.generatedStrategy.name}`);
+    if(adaptive.bestTactic) evidence.push(`Library tactic: ${adaptive.bestTactic.name} (${adaptive.bestTactic.score})`);
+    if(adaptive.blend) evidence.push(`Mixed strategy: ${adaptive.blend.id}`);
     if(plan && plan.riskReward) evidence.push(`Plan R:R 1:${round(plan.riskReward, 2)}`);
     if(brainMemory.summary) evidence.push(`Past context: ${brainMemory.summary}`);
     if(decision.liquidityMap && decision.liquidityMap.warning) warnings.push(decision.liquidityMap.warning);
     if(signal.hardReasons && signal.hardReasons.length) warnings.push(...signal.hardReasons.slice(0, 3));
     if(philosophy.guardrails.length) warnings.push(philosophy.guardrails[0].message);
     if(executionQuality.issues.length) warnings.push(executionQuality.issues[0]);
+    warnings.push(...adaptive.marketRules.slice(0, 1));
 
     const nextTrigger = action === 'DEMO_READY' && plan
       ? `Demo-ready only inside ${round(plan.entryZone[0], priceDigits(plan.entry))}-${round(plan.entryZone[1], priceDigits(plan.entry))}; invalidation ${round(plan.stopLoss, priceDigits(plan.stopLoss))}`
@@ -2210,6 +2504,10 @@
       situation,
       philosophy,
       executionQuality,
+      adaptive,
+      generatedStrategy:adaptive.generatedStrategy,
+      commitDecision:adaptive.canCommit ? 'COMMIT' : adaptive.verdict,
+      decisionMode:adaptive.decisionMode,
       memoryHooks:BRAIN_LIBRARY.memoryHooks,
       confidence:Math.round(clamp(confidence, 0, 100)),
       marketState:brainMemory.summary,

@@ -509,6 +509,44 @@
     localStorage.setItem('goldpilotTradeJournal', JSON.stringify(rows.slice(0, 250)));
   }
 
+  function loadGeneratedStrategies(){
+    try{
+      const rows = JSON.parse(localStorage.getItem('goldpilotGeneratedStrategies') || '[]');
+      return Array.isArray(rows) ? rows : [];
+    } catch(e){
+      return [];
+    }
+  }
+
+  function saveGeneratedStrategies(rows){
+    localStorage.setItem('goldpilotGeneratedStrategies', JSON.stringify(rows.slice(0, 150)));
+  }
+
+  function saveGeneratedStrategy(decision){
+    const strategy = decision && decision.marketBrain && decision.marketBrain.generatedStrategy;
+    if(!strategy || !strategy.id) return false;
+    const rows = loadGeneratedStrategies();
+    const key = `${CONFIG.symbol}|${activeTimeframe}|${strategy.id}|${strategy.decision}|${strategy.decisionMode}`;
+    const existing = rows.find(row => row.key === key);
+    const payload = Object.assign({}, strategy, {
+      key,
+      symbol:CONFIG.symbol,
+      timeframe:activeTimeframe,
+      savedAt:new Date().toISOString(),
+      tradeStatus:decision.tradeStatus,
+      setup:decision.setup && decision.setup.setup,
+      brainAction:decision.marketBrain.action,
+      commitDecision:decision.marketBrain.commitDecision
+    });
+    if(existing){
+      Object.assign(existing, payload, {seenCount:Number(existing.seenCount || 1) + 1});
+    } else {
+      rows.unshift(Object.assign({seenCount:1}, payload));
+    }
+    saveGeneratedStrategies(rows);
+    return true;
+  }
+
   function loadCommittedSignals(){
     try{
       const saved = JSON.parse(localStorage.getItem('goldpilotCommittedSignals') || '{}');
@@ -852,17 +890,92 @@
   }
 
   function isCommittableDecision(decision){
-    if(!(decision && decision.tradePlan && decision.signalGrade && decision.signalGrade.committable)) return false;
+    const final = decision && decision.finalTradeDecision ? decision.finalTradeDecision : resolveFinalTradeDecision(decision);
+    if(!(final && final.allowCommit && decision && decision.tradePlan)) return false;
     if(!isTradePlanPriceCompatible(decision.tradePlan)) return false;
-    if(!settings.aiEnabled) return true;
-    const ai = decision.aiDecision || aiDecisionCache[decisionSignature(decision)];
-    if(!ai) return false;
-    return ai.finalDecision === 'APPROVE' && Number(ai.confidence || 0) >= 65 && ai.isLate !== true;
+    return true;
+  }
+
+  function brainApprovesCommit(decision){
+    const brain = decision && decision.marketBrain;
+    return !!(brain && (brain.commitDecision === 'COMMIT' || (brain.adaptive && brain.adaptive.canCommit === true)));
   }
 
   function aiDecisionAllowsWatch(decision){
     const ai = decision && (decision.aiDecision || aiDecisionCache[decisionSignature(decision)]);
     return !!(ai && ['WAIT','BLOCK','LATE'].includes(ai.finalDecision));
+  }
+
+  function priceInsideEntryZone(plan){
+    if(!plan || !Array.isArray(plan.entryZone) || plan.entryZone.length < 2) return true;
+    const price = currentMarketPrice();
+    if(price == null || !isFinite(Number(price))) return false;
+    const low = Math.min(Number(plan.entryZone[0]), Number(plan.entryZone[1]));
+    const high = Math.max(Number(plan.entryZone[0]), Number(plan.entryZone[1]));
+    return Number(price) >= low && Number(price) <= high;
+  }
+
+  function resolveFinalTradeDecision(decision){
+    if(!decision) return null;
+    const brain = decision.marketBrain || {};
+    const adaptive = brain.adaptive || {};
+    const generated = brain.generatedStrategy || adaptive.generatedStrategy || null;
+    const plan = decision.tradePlan || null;
+    const ai = decision.aiDecision || aiDecisionCache[decisionSignature(decision)] || null;
+    const aiReasons = ai && Array.isArray(ai.reasonCodes) ? ai.reasonCodes : [];
+    const brainCommit = brainApprovesCommit(decision);
+    const inZone = priceInsideEntryZone(plan);
+    const direction = plan ? plan.side : generated ? generated.direction : decision.preferredDirection || 'WAIT';
+    const base = {
+      finalAction:'WAIT',
+      label:'WAIT',
+      allowCommit:false,
+      direction,
+      confidence:brain.confidence || adaptive.evidenceScore || 0,
+      source:'ENGINE_BRAIN',
+      reason:'Waiting for the brain to finish decision synthesis.',
+      strategy:generated ? generated.name : brain.playbook || null,
+      decisionMode:brain.decisionMode || adaptive.decisionMode || 'OBSERVE',
+      entryZone:plan && plan.entryZone || null,
+      invalidation:plan && plan.invalidation || plan && plan.stopLoss || null,
+      priceInEntryZone:inZone
+    };
+    if(decision.tradeStatus && decision.tradeStatus.includes('COMMITTED')){
+      return Object.assign(base, {finalAction:'MANAGE', label:decision.tradeStatus, allowCommit:false, source:'COMMITTED_SIGNAL', reason:'A committed signal is already active.'});
+    }
+    if(decision.tradeStatus === 'BLOCKED' || brain.action === 'BLOCK'){
+      return Object.assign(base, {finalAction:'BLOCK', label:'BLOCK', source:'RISK_BLOCK', reason:(brain.warnings && brain.warnings[0]) || (decision.reason || ['Risk block active'])[0] || 'Risk block active.'});
+    }
+    if(settings.aiEnabled && !ai){
+      return Object.assign(base, {finalAction:'WAIT_FOR_OLLAMA', label:'WAIT - Ollama pending', source:'OLLAMA_PENDING', reason:'Ollama is enabled, so final trade permission waits for Ollama approval.'});
+    }
+    if(settings.aiEnabled && ai){
+      const aiConfidence = Number(ai.confidence || 0);
+      if(aiReasons.includes('ollama_unavailable')){
+        return Object.assign(base, {finalAction:'WAIT_FOR_OLLAMA', label:'WAIT - Ollama unavailable', source:'OLLAMA_UNAVAILABLE', confidence:0, reason:ai.nextTrigger || 'Ollama is unavailable, so final permission is not granted.'});
+      }
+      if(ai.finalDecision === 'BLOCK' || ai.finalDecision === 'LATE' || ai.isLate === true){
+        return Object.assign(base, {finalAction:ai.finalDecision === 'LATE' ? 'LATE' : 'BLOCK', label:`${ai.finalDecision} ${ai.bestDirection}`, source:'OLLAMA', confidence:aiConfidence, reason:ai.nextTrigger || 'Ollama blocked the trade.'});
+      }
+      if(ai.finalDecision !== 'APPROVE' || aiConfidence < 65){
+        return Object.assign(base, {finalAction:'WAIT', label:`${ai.finalDecision || 'WAIT'} ${ai.bestDirection || 'WAIT'}`, source:'OLLAMA', confidence:aiConfidence, reason:ai.nextTrigger || 'Ollama has not approved the trade.'});
+      }
+    }
+    if(!brainCommit){
+      const action = adaptive.verdict === 'ALERT' || brain.action === 'ALERT' ? 'ALERT' : 'WAIT';
+      return Object.assign(base, {finalAction:action, label:action, source:settings.aiEnabled ? 'OLLAMA_APPROVED_ENGINE_WAIT' : 'ENGINE_BRAIN', reason:generated ? generated.marketRead : brain.nextTrigger || 'Generated strategy is not commit-ready yet.'});
+    }
+    if(!inZone){
+      return Object.assign(base, {finalAction:'WAIT_FOR_ENTRY', label:`WAIT FOR ${direction} ENTRY`, source:settings.aiEnabled ? 'OLLAMA_AND_ENGINE' : 'ENGINE_BRAIN', reason:'Brain approves the strategy, but current price is outside the valid entry zone.'});
+    }
+    return Object.assign(base, {
+      finalAction:'COMMIT',
+      label:`COMMIT ${direction}`,
+      allowCommit:true,
+      source:settings.aiEnabled ? 'OLLAMA_AND_ENGINE' : 'ENGINE_BRAIN',
+      confidence:settings.aiEnabled && ai ? Number(ai.confidence || 0) : base.confidence,
+      reason:generated ? generated.marketRead : brain.nextTrigger || 'Brain and risk conditions approve this trade.'
+    });
   }
 
   function loadActiveCommittedSignal(){
@@ -948,6 +1061,8 @@
       cryptoRisk:decision.cryptoContext,
       htfAlignment:decision.htfAlignment,
       sessionRules:decision.sessionRules,
+      generatedStrategy:decision.marketBrain ? decision.marketBrain.generatedStrategy : null,
+      brainDecisionMode:decision.marketBrain ? decision.marketBrain.decisionMode : null,
       tradePlan:plan ? {
         side:plan.side,
         entry:plan.entry,
@@ -1107,10 +1222,10 @@
   function displayActionableTradePlan(decision){
     const plan = decision && decision.tradePlan ? decision.tradePlan : null;
     if(!isTradePlanPriceCompatible(plan)) return null;
+    const final = decision && decision.finalTradeDecision ? decision.finalTradeDecision : resolveFinalTradeDecision(decision);
     if(decision.tradeStatus && decision.tradeStatus.includes('COMMITTED')) return plan;
-    if(isCommittableDecision(decision)) return plan;
-    if(decision.tradeStatus === 'ENTRY READY') return plan;
-    if(decision.signalGrade && decision.signalGrade.committable && decision.risk && decision.risk.allowed) return plan;
+    if(final && ['COMMIT','WAIT_FOR_ENTRY'].includes(final.finalAction)) return plan;
+    if(decision.tradeStatus === 'ENTRY READY' && final && final.finalAction !== 'WAIT_FOR_OLLAMA') return plan;
     return null;
   }
 
@@ -1760,10 +1875,12 @@
   function renderDashboard(decision){
     const signature = decisionSignature(decision);
     if(settings.aiEnabled && aiDecisionCache[signature]) decision.aiDecision = aiDecisionCache[signature];
+    decision.finalTradeDecision = resolveFinalTradeDecision(decision);
     const freshCommit = commitDecision(decision);
     const activeCommit = freshCommit || loadActiveCommittedSignal();
     decision = applyCommittedSignal(decision, activeCommit);
     if(settings.aiEnabled && aiDecisionCache[signature]) decision.aiDecision = aiDecisionCache[signature];
+    decision.finalTradeDecision = resolveFinalTradeDecision(decision);
     if(settings.aiEnabled) requestOllamaAiDecision(decision);
     lastDecision = decision;
     renderHero(decision);
@@ -1780,6 +1897,7 @@
     renderChecklist(decision);
     renderBottomBar(decision);
     renderDecisionState(decision);
+    saveGeneratedStrategy(decision);
     appendJournalSnapshot(decision, 'auto');
     populateTradeSignalSelect();
     renderTradeJournal();
@@ -1792,34 +1910,36 @@
   }
 
   function renderDecisionState(decision){
+    const finalTrade = decision.finalTradeDecision || resolveFinalTradeDecision(decision);
     const score = displayReadinessScore(decision);
     const badge = qs('#status-badge');
-    if(badge && isCommittableDecision(decision)) badge.classList.add('allowed');
+    if(badge && finalTrade && finalTrade.allowCommit) badge.classList.add('allowed');
     const setupEl = qsa('.status-row > div')[1];
     if(setupEl){
       const lines = setupEl.querySelectorAll('div');
       if(lines[1]){
         const grade = decision.signalGrade ? ` | grade ${decision.signalGrade.grade}` : '';
         const master = decision.masterScore ? ` | master ${decision.masterScore.score} ${decision.masterScore.tier}` : '';
-        lines[1].textContent = `${decision.setupStage || 'WAIT'} | readiness ${score}%${grade}${master}`;
+        lines[1].textContent = `${decision.setupStage || 'WAIT'} | evidence ${score}/100${grade}${master}`;
       }
     }
   }
 
   function renderHero(decision){
+    const finalTrade = decision.finalTradeDecision || resolveFinalTradeDecision(decision);
     const badge = qs('#status-badge');
     if(badge){
       badge.className = 'status-badge';
-      if(decision.tradeStatus === 'BLOCKED') badge.classList.add('blocked');
-      else if(decision.tradeStatus.includes('ALLOWED') || isCommittableDecision(decision) || decision.tradeStatus.includes('COMMITTED')) badge.classList.add('allowed');
+      if(finalTrade && ['BLOCK','LATE'].includes(finalTrade.finalAction)) badge.classList.add('blocked');
+      else if(finalTrade && ['COMMIT','MANAGE'].includes(finalTrade.finalAction)) badge.classList.add('allowed');
       else badge.classList.add('wait');
-      badge.textContent = decision.tradeStatus;
+      badge.textContent = finalTrade ? finalTrade.label : decision.tradeStatus;
     }
 
     const setup = displaySetup(decision);
     const score = displayReadinessScore(decision);
     const setupText = setup && setup.setup
-      ? `${setup.setup} (${setup.quality || 'Watch'}) | readiness ${score}%${decision.masterScore ? ` | master ${decision.masterScore.score} ${decision.masterScore.tier}` : ''}`
+      ? `${setup.setup} (${setup.quality || 'Watch'}) | setup ${score}/100${decision.masterScore ? ` | engine ${decision.masterScore.score}/100 ${decision.masterScore.tier}` : ''}`
       : 'No valid setup confirmed';
     const setupEl = qsa('.status-row > div')[1];
     if(setupEl){
@@ -1847,14 +1967,14 @@
     if(advisor){
       const ai = decision.aiDecision;
       const aiLine = ai
-        ? `<br><span style="color:var(--gold)">AI Decision:</span> ${escapeHtml(ai.finalDecision)} ${escapeHtml(ai.bestDirection)} | L ${fmt(ai.longProbability,0)} / S ${fmt(ai.shortProbability,0)} / W ${fmt(ai.waitProbability,0)} | ${escapeHtml(ai.entryTiming)}`
+        ? `<b>Ollama Brain:</b> ${escapeHtml(ai.finalDecision)} ${escapeHtml(ai.bestDirection)} | confidence ${fmt(ai.confidence,0)}% | L ${fmt(ai.longProbability,0)} / S ${fmt(ai.shortProbability,0)} / W ${fmt(ai.waitProbability,0)} | ${escapeHtml(ai.entryTiming)}`
         : settings.aiEnabled
-          ? `<br><span style="color:var(--amber)">AI Decision:</span> Waiting for Ollama structured decision...`
+          ? `<b>Ollama Brain:</b> Waiting for structured decision...`
           : '';
       const advisorHtml = [
-        `<b>GoldPilot AI Read:</b> ${escapeHtml(advisor.summary)}`,
-        aiLine,
-        `<br><span style="color:var(--text2)">Primary:</span> ${escapeHtml(advisor.primaryIdea)}.`,
+        aiLine || `<b>GoldPilot Engine Read:</b> ${escapeHtml(advisor.summary)}`,
+        finalTrade ? `<br><span style="color:var(--text2)">Final:</span> ${escapeHtml(finalTrade.label)}. ${escapeHtml(finalTrade.reason || '')}` : '',
+        aiLine ? `<br><span style="color:var(--text2)">Engine evidence:</span> ${escapeHtml(advisor.primaryIdea)}.` : `<br><span style="color:var(--text2)">Primary:</span> ${escapeHtml(advisor.primaryIdea)}.`,
         `<br><span style="color:var(--text2)">Next:</span> ${escapeHtml(ai && ai.nextTrigger ? ai.nextTrigger : (advisor.nextBestActions || [])[0] || 'Wait for a cleaner confirming candle.')}`,
         advisor.mistakeWarning && advisor.mistakeWarning.length
           ? `<br><span style="color:var(--red)">Warning:</span> ${escapeHtml(advisor.mistakeWarning[0])}`
@@ -1873,9 +1993,14 @@
 
   function renderMarketBrain(decision){
     const brain = decision.marketBrain || {};
+    const finalTrade = decision.finalTradeDecision || resolveFinalTradeDecision(decision);
+    const ai = decision.aiDecision || null;
+    const aiReasons = ai && Array.isArray(ai.reasonCodes) ? ai.reasonCodes : [];
+    const aiMain = settings.aiEnabled && ai && !aiReasons.includes('ollama_unavailable');
     const action = qs('#brain-action');
     const final = qs('#brain-final');
     const playbook = qs('#brain-playbook');
+    const source = qs('#brain-source');
     const confidence = qs('#brain-confidence');
     const fill = qs('#brain-confidence-fill');
     const situation = qs('#brain-situation');
@@ -1884,34 +2009,49 @@
     const library = qs('#brain-library');
     const next = qs('#brain-next');
     const warning = qs('#brain-warning');
-    const actionText = brain.action || 'WAIT';
-    const actionColor = actionText === 'DEMO_READY' ? 'var(--green)'
-      : actionText === 'BLOCK' ? 'var(--red)'
-        : actionText === 'ALERT' ? 'var(--gold-light)' : 'var(--cyan)';
+    const actionText = finalTrade ? finalTrade.label : aiMain ? ai.finalDecision : brain.action || 'WAIT';
+    const actionColor = /APPROVE|DEMO_READY|COMMIT|COMMITTED|MANAGE/.test(actionText) ? 'var(--green)'
+      : /BLOCK|LATE/.test(actionText) ? 'var(--red)'
+        : /ALERT/.test(actionText) ? 'var(--gold-light)' : 'var(--cyan)';
     if(action){
       action.textContent = actionText.replace('_', ' ');
       action.style.color = actionColor;
       action.style.borderColor = actionColor;
     }
-    if(final) final.textContent = brain.finalDecision || 'Wait';
-    if(playbook) playbook.textContent = `${brain.playbook || 'No playbook'} | ${brain.autonomy || 'Observation mode'}`;
-    if(confidence) confidence.textContent = `Confidence ${fmt(brain.confidence || 0, 0)}%`;
-    if(fill) fill.style.width = `${Math.max(0, Math.min(100, Number(brain.confidence || 0)))}%`;
+    if(source) source.textContent = finalTrade ? `Final: ${finalTrade.source} | ${finalTrade.decisionMode}` : aiMain ? `Ollama main brain | ${ai.entryTiming}` : settings.aiEnabled ? 'Ollama pending | engine evidence shown' : 'Engine brain | Ollama off';
+    if(final) final.textContent = finalTrade ? `${finalTrade.label} | ${finalTrade.direction || 'WAIT'}` : aiMain ? `Ollama says ${ai.finalDecision} ${ai.bestDirection}` : brain.finalDecision || 'Wait';
+    const generated = brain.generatedStrategy || brain.adaptive && brain.adaptive.generatedStrategy || null;
+    if(playbook) playbook.textContent = generated ? `Generated strategy: ${generated.name}` : aiMain ? `Main decision: ${ai.nextTrigger}` : `${brain.playbook || 'No playbook'} | ${brain.autonomy || 'Observation mode'}`;
+    const mainConfidence = finalTrade && finalTrade.confidence != null ? finalTrade.confidence : aiMain ? ai.confidence : brain.confidence || 0;
+    if(confidence) confidence.textContent = aiMain && finalTrade && finalTrade.source === 'OLLAMA' ? `Ollama confidence ${fmt(mainConfidence, 0)}%` : `Final confidence ${fmt(mainConfidence, 0)}/100`;
+    if(fill) fill.style.width = `${Math.max(0, Math.min(100, Number(mainConfidence || 0)))}%`;
+    const probGrid = qs('#ai-prob-grid');
+    if(probGrid) probGrid.style.display = aiMain ? 'grid' : 'none';
+    setText('#ai-prob-long', aiMain ? `${fmt(ai.longProbability, 0)}%` : '0%');
+    setText('#ai-prob-short', aiMain ? `${fmt(ai.shortProbability, 0)}%` : '0%');
+    setText('#ai-prob-wait', aiMain ? `${fmt(ai.waitProbability, 0)}%` : '0%');
     if(situation) situation.textContent = brain.situation ? `${brain.situation.label} | ${(brain.situation.reasons || [])[0] || 'No dominant situation reason'}` : '-';
     if(discipline){
       const philosophy = brain.philosophy || {};
       const execution = brain.executionQuality || {};
-      discipline.textContent = `${execution.label || 'WAIT'} ${fmt(execution.score || 0, 0)} | ${philosophy.summary || 'No discipline warning'}`;
+      discipline.textContent = `${execution.label || 'WAIT'} ${fmt(execution.score || 0, 0)}/100 | ${philosophy.summary || 'No discipline warning'}`;
     }
     if(past) past.textContent = brain.marketState || '-';
     if(library){
       const rankings = brain.playbookRankings || [];
-      library.textContent = rankings.length
+      const adaptive = brain.adaptive && Array.isArray(brain.adaptive.libraryUsed) ? brain.adaptive.libraryUsed : [];
+      const hybrid = generated ? generated.name : brain.adaptive && brain.adaptive.bestHybrid ? brain.adaptive.bestHybrid.name : null;
+      const mode = brain.decisionMode || (brain.adaptive && brain.adaptive.decisionMode);
+      library.textContent = hybrid
+        ? `${hybrid} | ${mode || 'HYBRID'}`
+        : adaptive.length
+        ? adaptive.slice(0, 3).join(' | ')
+        : rankings.length
         ? rankings.slice(0, 3).map(p => `${p.name} ${fmt(p.score, 0)}`).join(' | ')
         : brain.playbook || '-';
     }
-    if(next) next.textContent = brain.nextTrigger || '-';
-    if(warning) warning.textContent = brain.warnings && brain.warnings.length ? brain.warnings[0] : (brain.evidence && brain.evidence[0]) || 'No major warning';
+    if(next) next.textContent = finalTrade && finalTrade.reason ? finalTrade.reason : aiMain ? ai.nextTrigger : brain.nextTrigger || '-';
+    if(warning) warning.textContent = finalTrade && finalTrade.finalAction === 'WAIT_FOR_ENTRY' ? 'Valid strategy, but price is outside the entry zone.' : aiMain && aiReasons.length ? aiReasons.join(', ') : brain.warnings && brain.warnings.length ? brain.warnings[0] : (brain.evidence && brain.evidence[0]) || 'No major warning';
   }
 
   function renderChart(candles){
@@ -2128,6 +2268,7 @@
   function renderSignal(decision){
     const card = qs('#signal-card');
     if(!card) return;
+    const finalTrade = decision.finalTradeDecision || resolveFinalTradeDecision(decision);
     const plan = displayActionableTradePlan(decision);
     const setup = displaySetup(decision);
     const type = card.querySelector('.signal-type');
@@ -2139,12 +2280,14 @@
     const zone = card.querySelector('.zone-price');
     const rr = card.querySelector('.rr-val');
     const rrFill = card.querySelector('.rr-fill');
-    const side = plan ? plan.side : 'WAIT';
+    const side = plan ? plan.side : finalTrade && finalTrade.direction ? finalTrade.direction : 'WAIT';
     const planHasValidReward = !!(plan && plan.riskReward >= 2);
     renderDirectionalSetups(decision);
     if(type){
       const prefix = decision.tradeStatus.includes('COMMITTED') ? 'COMMITTED ' : '';
-      type.textContent = plan && setup && setup.setup
+      type.textContent = finalTrade && !plan && finalTrade.finalAction !== 'COMMIT'
+        ? finalTrade.label
+        : plan && setup && setup.setup
         ? `${prefix}${side} - ${setup.setup}`
         : `${decision.preferredDirection || 'NONE'} - ${setup && setup.setup ? setup.setup : 'No valid signal'}`;
       type.style.color = side === 'SHORT' ? 'var(--red)' : side === 'LONG' ? 'var(--green)' : 'var(--amber)';
@@ -2153,10 +2296,12 @@
       icon.className = side === 'SHORT' ? 'ti ti-arrow-down' : side === 'LONG' ? 'ti ti-arrow-up' : 'ti ti-clock';
       icon.style.color = side === 'SHORT' ? 'var(--red)' : side === 'LONG' ? 'var(--green)' : 'var(--amber)';
     }
-    if(time) time.textContent = decision.tradeStatus.includes('COMMITTED') ? 'Committed' : isCommittableDecision(decision) ? `Ready ${decision.signalGrade.grade}` : 'Forming';
+    if(time) time.textContent = decision.tradeStatus.includes('COMMITTED') ? 'Committed' : finalTrade ? finalTrade.label : 'Forming';
     if(clear) clear.style.display = decision.tradeStatus.includes('COMMITTED') ? 'inline-flex' : 'none';
     if(hint){
-      if(decision.aiDecision){
+      if(finalTrade && finalTrade.finalAction !== 'COMMIT'){
+        hint.textContent = `${finalTrade.label}: ${finalTrade.reason || 'Waiting for a cleaner synchronized decision.'}`;
+      } else if(decision.aiDecision){
         const ai = decision.aiDecision;
         const aiVerdict = `AI ${ai.finalDecision} ${ai.bestDirection} (${fmt(ai.confidence, 0)}%): ${ai.nextTrigger}`;
         if(decision.aiAdvisor){
@@ -2306,9 +2451,9 @@
       {ok: !crypto || !crypto.chaseRisk, label: crypto && crypto.isCrypto ? 'Crypto chase/liquidation risk' : crypto && crypto.isIndianIndex ? 'India index opening/expiry risk clear' : 'Market-specific risk clear'},
       {ok: !!(setup && setup.direction), label: setup && setup.setup ? setup.setup : 'Valid setup detected'},
       {ok: decision.preferredDirection !== 'NONE', label: `Preferred direction: ${decision.preferredDirection || 'NONE'}`},
-      {ok: !!decision.nextStepForecast, label: decision.nextStepForecast ? `Next step: ${decision.nextStepForecast.leadDirection} ${decision.nextStepForecast.confidence}%` : 'Next-step read'},
+      {ok: !!decision.nextStepForecast, label: decision.nextStepForecast ? `Next-step evidence: ${decision.nextStepForecast.leadDirection} ${decision.nextStepForecast.confidence}/100` : 'Next-step evidence'},
       {ok: !missing.some(m => /BOS|CHOCH/i.test(m)), label: 'BOS/CHOCH confirmation'},
-      {ok: decision.entryTrigger.ready, label: `Entry trigger ready (${displayReadinessScore(decision)}%)`},
+      {ok: decision.entryTrigger.ready, label: `Entry trigger evidence (${displayReadinessScore(decision)}/100)`},
       {ok: !!plan && plan.riskReward >= 2, label: 'R:R minimum 1:2'},
       {ok: decision.risk.allowed, label: 'Risk permission'}
     ];
@@ -2343,7 +2488,7 @@
       return `<div class="watchlist-row" data-symbol="${escapeHtml(row.symbol)}" title="Open ${escapeHtml(row.symbol)} chart">
         <div class="watch-symbol">${escapeHtml(row.symbol.replace('USDT',''))}</div>
         <div class="watch-status">${escapeHtml(row.status)}<br>${escapeHtml(detail)}<br><span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace">${escapeHtml(age)}</span></div>
-        <div class="watch-score ${scoreClass}"><span style="display:block;font-size:9px;color:var(--text3)">Setup</span>${row.score}%</div>
+        <div class="watch-score ${scoreClass}"><span style="display:block;font-size:9px;color:var(--text3)">Scan</span>${row.score}/100</div>
       </div>`;
     }).join('');
     const alerts = rows.filter(r => r.ready);
@@ -2375,7 +2520,7 @@
     }
     const side = best.side && best.side !== 'NONE' ? ` ${best.side}` : '';
     const blocker = best.reason || best.setup || best.stage || 'Waiting for cleaner setup';
-    return `Committed today: ${demoCommittedToday} | Active committed: ${activeCommitted} | Best forming: ${best.symbol}${side} ${best.score}% | ${blocker}`;
+    return `Committed today: ${demoCommittedToday} | Active committed: ${activeCommitted} | Best forming: ${best.symbol}${side} scan ${best.score}/100 | ${blocker}`;
   }
 
   function notifyConfirmedTrades(rows){
