@@ -6,7 +6,7 @@
     refreshMs: 60000,
     candlesLimit: 240,
     cloudApiBase: '',
-    marketApiBase: '',
+    marketApiBase: 'https://goldpilot-market-data.dakshpabla32.workers.dev',
     allowIndianCacheFallback: false,
     account: {
       balance: 1000,
@@ -115,6 +115,8 @@
   let cloudSyncInFlight = false;
   const aiDecisionCache = {};
   const aiDecisionInFlight = {};
+  let aiUnavailableUntil = 0;
+  let lastSuccessfulAiDecision = null;
 
   function qs(selector){ return document.querySelector(selector); }
   function qsa(selector){ return Array.from(document.querySelectorAll(selector)); }
@@ -328,6 +330,22 @@
     return inferredWorkersDevBase('goldpilot-market-data');
   }
 
+  function uniqueApiBases(bases){
+    return [...new Set((bases || []).filter(Boolean).map(base => String(base).replace(/\/$/, '')))];
+  }
+
+  function marketApiCandidates(){
+    return uniqueApiBases([
+      window.GOLDPILOT_MARKET_API_BASE,
+      localStorage.getItem('goldpilotMarketApiBase'),
+      CONFIG.marketApiBase,
+      inferredWorkersDevBase('goldpilot-market-data'),
+      window.GOLDPILOT_API_BASE,
+      localStorage.getItem('goldpilotCloudApiBase'),
+      CONFIG.cloudApiBase
+    ]);
+  }
+
   function marketApiEnabled(){
     return !!marketApiBase();
   }
@@ -365,13 +383,21 @@
   }
 
   async function marketApi(path, options={}){
-    const base = marketApiBase();
-    if(!base) throw new Error('Market API base is not configured');
-    const res = await fetch(`${base}${path}`, Object.assign({
-      headers:{'content-type':'application/json'}
-    }, options));
-    if(!res.ok) throw new Error(`Market API ${res.status}`);
-    return res.json();
+    const bases = marketApiCandidates();
+    if(!bases.length) throw new Error('Market API base is not configured');
+    let lastError = null;
+    for(const base of bases){
+      try{
+        const res = await fetch(`${base}${path}`, Object.assign({
+          headers:{'content-type':'application/json'}
+        }, options));
+        if(!res.ok) throw new Error(`${base} ${res.status}`);
+        return await res.json();
+      } catch(err){
+        lastError = err;
+      }
+    }
+    throw lastError || new Error('Market API unavailable');
   }
 
   function currentDemoState(){
@@ -1025,12 +1051,16 @@
   function decisionSignature(decision){
     const plan = displayTradePlan(decision) || {};
     const setup = displaySetup(decision);
+    const generated = decision.marketBrain && decision.marketBrain.generatedStrategy;
     return [
       activeTimeframe,
+      CONFIG.symbol,
       decision.tradeStatus,
       decision.bias && decision.bias.bias,
       decision.regime && decision.regime.regime,
       setup && setup.setup,
+      decision.marketBrain && decision.marketBrain.decisionMode,
+      generated && generated.id,
       plan.entry,
       plan.stopLoss,
       plan.takeProfit && plan.takeProfit.tp1
@@ -1129,6 +1159,31 @@
     if(!settings.aiEnabled || !decision) return;
     const signature = decisionSignature(decision);
     if(aiDecisionCache[signature] || aiDecisionInFlight[signature]) return;
+    if(Date.now() < aiUnavailableUntil){
+      aiDecisionCache[signature] = lastSuccessfulAiDecision
+        ? Object.assign({}, lastSuccessfulAiDecision, {
+            finalDecision:'WAIT',
+            bestDirection:lastSuccessfulAiDecision.bestDirection || 'WAIT',
+            confidence:Math.min(Number(lastSuccessfulAiDecision.confidence || 0), 55),
+            nextTrigger:'Ollama retry cooldown is active; waiting instead of using a stale approval.',
+            reasonCodes:[...(lastSuccessfulAiDecision.reasonCodes || []), 'ollama_retry_cooldown']
+          })
+        : {
+            finalDecision:'WAIT',
+            bestDirection:'WAIT',
+            longProbability:0,
+            shortProbability:0,
+            waitProbability:100,
+            entryTiming:'NO_TRADE',
+            isLate:false,
+            nextTrigger:'Ollama retry cooldown is active. Check that Ollama is running and allows browser requests.',
+            entryZone:null,
+            invalidation:null,
+            confidence:0,
+            reasonCodes:['ollama_retry_cooldown']
+          };
+      return;
+    }
     aiDecisionInFlight[signature] = true;
     const facts = buildAiDecisionFacts(decision);
     const prompt = [
@@ -1159,13 +1214,24 @@
       const parsed = normalizeAiDecision(extractJsonObject(rawText));
       if(parsed){
         aiDecisionCache[signature] = parsed;
+        lastSuccessfulAiDecision = parsed;
+        aiUnavailableUntil = 0;
         if(lastDecision && decisionSignature(lastDecision) === signature){
           lastDecision.aiDecision = parsed;
           renderDashboard(lastDecision);
         }
       }
     } catch(err){
-      aiDecisionCache[signature] = {
+      aiUnavailableUntil = Date.now() + 120000;
+      aiDecisionCache[signature] = lastSuccessfulAiDecision
+        ? Object.assign({}, lastSuccessfulAiDecision, {
+            finalDecision:'WAIT',
+            bestDirection:lastSuccessfulAiDecision.bestDirection || 'WAIT',
+            confidence:Math.min(Number(lastSuccessfulAiDecision.confidence || 0), 55),
+            nextTrigger:`Ollama refresh failed (${err.message}). Waiting and retrying soon; stale approvals are not allowed.`,
+            reasonCodes:[...(lastSuccessfulAiDecision.reasonCodes || []), 'ollama_refresh_failed']
+          })
+        : {
         finalDecision:'WAIT',
         bestDirection:'WAIT',
         longProbability:0,
@@ -1177,8 +1243,8 @@
         entryZone:null,
         invalidation:null,
         confidence:0,
-        reasonCodes:['ollama_unavailable']
-      };
+            reasonCodes:['ollama_refresh_failed']
+          };
       console.warn('Ollama AI decision failed', err);
     } finally {
       delete aiDecisionInFlight[signature];
@@ -1369,6 +1435,24 @@
     return grouped;
   }
 
+  function normalizeMarketApiCandles(rows, limit){
+    return (Array.isArray(rows) ? rows : [])
+      .map(row => ({
+        t:Number(row.t),
+        o:Number(row.o),
+        h:Number(row.h),
+        l:Number(row.l),
+        c:Number(row.c),
+        v:Number(row.v || 0),
+        x:Number(row.x || row.t),
+        isClosed:row.isClosed !== false,
+        source:row.source
+      }))
+      .filter(c => [c.t,c.o,c.h,c.l,c.c].every(Number.isFinite) && c.o > 0 && c.h > 0 && c.l > 0 && c.c > 0)
+      .sort((a,b) => a.t - b.t)
+      .slice(-limit);
+  }
+
   async function fetchBinanceKlines(interval, limit=CONFIG.candlesLimit, symbol=CONFIG.symbol){
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     const rows = await fetchJson(url);
@@ -1394,10 +1478,10 @@
     if(marketApiEnabled()){
       try{
         const data = await marketApi(`/api/market-candles?symbol=${encodeURIComponent(profile.yahooSymbol || symbol)}&interval=${encodeURIComponent(interval)}&limit=${encodeURIComponent(limit)}`);
-        const rows = data && Array.isArray(data.candles) ? data.candles : [];
+        const rows = normalizeMarketApiCandles(data && data.candles, limit);
         if(rows.length){
           marketDataSourceMode = data.source === 'cache' ? 'cache' : 'worker';
-          return rows.slice(-limit);
+          return rows;
         }
       } catch(err){
         lastError = err;
@@ -2040,9 +2124,18 @@
     if(library){
       const rankings = brain.playbookRankings || [];
       const adaptive = brain.adaptive && Array.isArray(brain.adaptive.libraryUsed) ? brain.adaptive.libraryUsed : [];
+      const reasoning = brain.libraryReasoning || brain.adaptive && brain.adaptive.libraryReasoning || null;
       const hybrid = generated ? generated.name : brain.adaptive && brain.adaptive.bestHybrid ? brain.adaptive.bestHybrid.name : null;
       const mode = brain.decisionMode || (brain.adaptive && brain.adaptive.decisionMode);
-      library.textContent = hybrid
+      library.textContent = finalTrade && finalTrade.finalAction === 'MANAGE'
+        ? `Managing committed ${finalTrade.direction || 'trade'} | follow TP/invalidation, no fresh re-entry`
+        : reasoning && reasoning.vetoes && reasoning.vetoes.length
+        ? `Library veto: ${reasoning.vetoes[0]}`
+        : reasoning && reasoning.confirmationsNeeded && reasoning.confirmationsNeeded.length
+        ? `Library needs: ${reasoning.confirmationsNeeded[0]}`
+        : reasoning && reasoning.used && reasoning.used.length
+        ? `Library used: ${reasoning.used.slice(0, 4).join(' | ')}`
+        : hybrid
         ? `${hybrid} | ${mode || 'HYBRID'}`
         : adaptive.length
         ? adaptive.slice(0, 3).join(' | ')

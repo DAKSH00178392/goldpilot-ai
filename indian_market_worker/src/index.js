@@ -156,7 +156,11 @@ async function fetchBseLiveWithCachedHistory(symbol, interval, limit){
 
 function mergeLiveQuoteWithHistory(quote, history, limit){
   if(!quote || !history.length) return [];
-  const rows = history.slice(-limit).map(row => Object.assign({}, row, {isClosed:true, source:'history-cache'}));
+  const rows = history
+    .filter(row => [row.o,row.h,row.l,row.c].every(value => Number(value) > 0))
+    .slice(-limit)
+    .map(row => Object.assign({}, row, {isClosed:true, source:'history-cache'}));
+  if(!rows.length) return [];
   const last = rows[rows.length - 1];
   const liveTime = Date.now();
   const open = Number(quote.open) || last.c;

@@ -65,6 +65,8 @@ ok(decision.marketBrain.situation && decision.marketBrain.philosophy && decision
 ok(decision.marketBrain.adaptive && decision.marketBrain.commitDecision, 'GoldPilot market brain returns adaptive library verdict');
 ok(decision.marketBrain.decisionMode && Array.isArray(decision.marketBrain.adaptive.hybridRankings), 'GoldPilot market brain returns hybrid decision mode');
 ok(decision.marketBrain.generatedStrategy && decision.marketBrain.generatedStrategy.id && Array.isArray(decision.marketBrain.generatedStrategy.sourceKnowledge), 'GoldPilot market brain creates a live generated strategy');
+ok(decision.marketBrain.libraryReasoning && Array.isArray(decision.marketBrain.libraryReasoning.used), 'GoldPilot market brain exposes library reasoning rules');
+ok(decision.marketBrain.evidence.some(line => /Library evidence/.test(line)) || decision.marketBrain.libraryReasoning.used.length > 0, 'GoldPilot market brain uses library rules as decision evidence');
 ok(decision.aiAdvisor && decision.aiAdvisor.summary && decision.aiAdvisor.nextBestActions, 'GoldPilot decision returns AI advisor desk read');
 for(const candidate of [decision.longSetup, decision.shortSetup]){
   if(candidate && candidate.tradePlan){
@@ -108,10 +110,13 @@ ok(engineSource.includes('buildAiAdvisor'), 'engine builds AI advisor narrative 
 ok(engineSource.includes('MARKET_PLAYBOOKS'), 'engine includes market knowledge playbook library');
 ok(engineSource.includes('BRAIN_LIBRARY') && engineSource.includes('classifyBrainSituation'), 'engine structures brain philosophy and situation knowledge');
 ok(engineSource.includes('synthesizeAdaptiveBrainStrategy') && philosophySource.includes('CONTEXT_OVER_CHECKLIST'), 'engine lets brain synthesize adaptive strategy from knowledge library');
+ok(engineSource.includes('buildLibraryReasoning') && engineSource.includes('confirmationsNeeded') && engineSource.includes('vetoes'), 'engine converts library knowledge into confirmations and vetoes');
 ok(engineSource.includes('conceptMatches') && engineSource.includes('indicatorMatches') && engineSource.includes('marketPersonality'), 'engine uses modular brain concepts, indicators, and market personality');
 ok(engineSource.includes('psychologyMatches') && engineSource.includes('philosophyMatches'), 'engine uses psychology and trading philosophy knowledge');
 ok(engineSource.includes('hybridRankings') && engineSource.includes('HYBRID_CONTEXT_OPPORTUNITY'), 'engine can create hybrid strategy trade decisions');
 ok(engineSource.includes('generateLiveStrategy') && engineSource.includes('LIVE_SYNTH_'), 'engine generates custom live strategies from matched knowledge');
+ok(engineSource.includes('marketConditionAliases') && engineSource.includes('contextFingerprint'), 'engine fingerprints generated strategies with live market context');
+ok(engineSource.includes('comboHits >= 2 && strategy.conditionHits >= 1'), 'engine prevents broad hybrid templates from matching every market');
 ok(engineSource.includes('contextOpportunity') && engineSource.includes('executionQuality.score >= 52'), 'adaptive brain can approve lower checklist evidence when library context is strong');
 ok(engineSource.includes('FAILED_AUCTION') || engineSource.includes('/failed|auction|breakout/'), 'engine can match failed-breakout/trap concepts from brain library');
 ok(engineSource.includes('ELITE_SETUP'), 'master score supports elite setup tier');
@@ -206,6 +211,7 @@ ok(connectorJs.includes('goldpilotRiskSettings'), 'live connector persists risk 
 ok(connectorJs.includes('requestOllamaAiDecision'), 'live connector can request structured Ollama AI decisions');
 ok(connectorJs.includes("format:'json'"), 'Ollama AI request asks for strict JSON output');
 ok(connectorJs.includes('aiDecisionCache'), 'live connector caches AI decisions per signal signature');
+ok(connectorJs.includes('aiUnavailableUntil') && connectorJs.includes('ollama_retry_cooldown'), 'live connector cools down Ollama refresh failures instead of flipping unavailable repeatedly');
 ok(connectorJs.includes('Ollama Brain'), 'dashboard renders structured Ollama brain decision state');
 ok(connectorJs.includes('hydrateCloudDemoState'), 'live connector hydrates shared cloud demo state');
 ok(connectorJs.includes('syncCloudDemoState'), 'live connector pushes demo state to cloud');
@@ -219,6 +225,8 @@ ok(connectorJs.includes('wireMobileAlerts'), 'live connector wires mobile alert 
 ok(connectorJs.includes('refreshLiveNews'), 'live connector fetches live market news');
 ok(connectorJs.includes('/api/market-candles') && connectorJs.includes('marketDataErrorHint'), 'live connector has Indian market data proxy fallback guidance');
 ok(connectorJs.includes('marketApiBase') && connectorJs.includes('goldpilotMarketApiBase'), 'live connector has a dedicated Indian market data API base');
+ok(connectorJs.includes('goldpilot-market-data.dakshpabla32.workers.dev') && connectorJs.includes('marketApiCandidates'), 'live connector has deployed Indian market worker fallback candidates');
+ok(connectorJs.includes('normalizeMarketApiCandles') && connectorJs.includes('c.o > 0'), 'live connector rejects zero-price Indian worker candles');
 ok(connectorJs.includes("inferredWorkersDevBase('goldpilot-market-data')"), 'live connector auto-detects the Indian market worker on workers.dev deployments');
 ok(connectorJs.includes('function cloudApiBase()') && connectorJs.includes("return '';"), 'live connector does not assume the dashboard origin exposes cloud demo APIs');
 ok(connectorJs.includes('shouldTryDirectYahoo') && connectorJs.includes('return false;'), 'live connector avoids browser Yahoo CORS requests for Indian index candles');
@@ -295,6 +303,7 @@ ok(connectorJs.includes('decisionMode') && connectorJs.includes('bestHybrid'), '
 ok(connectorJs.includes('goldpilotGeneratedStrategies') && connectorJs.includes('saveGeneratedStrategy'), 'dashboard saves generated brain strategies');
 ok(connectorJs.includes('generatedStrategy') && connectorJs.includes('Generated strategy:'), 'dashboard displays generated brain strategy');
 ok(connectorJs.includes('Ollama main brain') && connectorJs.includes('Ollama confidence'), 'dashboard presents Ollama as the main brain confidence when enabled');
+ok(connectorJs.includes('Managing committed') && connectorJs.includes('no fresh re-entry'), 'dashboard shows management text instead of entry needs for committed signals');
 ok(connectorJs.includes('Engine evidence') && connectorJs.includes('Scan</span>${row.score}/100'), 'dashboard labels engine/watchlist scores separately from Ollama confidence');
 ok(connectorJs.includes('nextStepForecast'), 'dashboard displays next-step forecast from engine');
 ok(connectorJs.includes('formationPlan'), 'dashboard displays future trade formation plan');
